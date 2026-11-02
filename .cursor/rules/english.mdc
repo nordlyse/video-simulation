@@ -1,0 +1,15 @@
+---
+description: Comments, names, README, and docs stay in English
+alwaysApply: true
+---
+
+# Language
+
+Write all of the following in English:
+
+- Code comments
+- Class, method, and variable names
+- README and other docs
+- UI copy and commit messages
+
+Chat replies may follow the user's language.

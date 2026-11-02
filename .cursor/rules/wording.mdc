@@ -1,0 +1,23 @@
+---
+description: Do not use the word create; use add or insert
+alwaysApply: true
+---
+
+# Wording
+
+Do not use the word "create" in owned names or text. Use **add** or **insert**.
+
+Applies to method names, class names, comments, UI copy, README, docs, and commit messages.
+
+```text
+Bad:  void createSession()
+Good: void addSession()
+
+Bad:  class CreateUser
+Good: class AddUser
+
+Bad:  Create a session for this clip.
+Good: Add a session for this clip.
+```
+
+Framework APIs that require that word may stay, for example `document.createElement` or `Files.createDirectories`.

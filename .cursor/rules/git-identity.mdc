@@ -1,0 +1,19 @@
+---
+description: Push only as jakob.lyse (nordlyse); never as cursoragent
+alwaysApply: true
+---
+
+# Git identity
+
+Pushes must come only from Jakob Lyse, GitHub user `nordlyse` (`jakob.lyse`).
+
+- Author and committer: Jakob Lyse <jakob.lyse@gmail.com>.
+- Never add `Co-authored-by` for Cursor, cursoragent, or any other agent identity.
+- Never use omer.kurtuld, OmerKurtuldu, omerkurtuldu@gmail.com, CriticalSolution, or other personal or agent identities in author, committer, or trailers.
+
+On every push, check before the push goes out:
+
+1. `git log -5 --format='%an %ae | committer %cn %ce%n%b'`
+2. `git status`
+3. Confirm every commit on the push is Jakob Lyse <jakob.lyse@gmail.com> and that no trailer mentions Cursor or cursoragent.
+4. If another identity would show in Contributors, strip it, then push as nordlyse.
