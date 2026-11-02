@@ -2,4 +2,30 @@
 
 This application uses [Kornia](https://github.com/kornia/kornia) to take the image from a camera, combine it with selected videos, and turn the result into a simulation of being in virtual places. The combined image is then sent to a virtual camera.
 
-Kornia is licensed under Apache-2.0.
+## Licences
+
+These are the tools in the Compose image and the licences recorded with the installed packages.
+
+| Tool | Version | Licence |
+| --- | --- | --- |
+| [Kornia](https://github.com/kornia/kornia) | 0.9.0 | Apache-2.0 |
+| kornia_rs | 0.2.0 | Apache-2.0 |
+| torch | 2.15.0+cpu | Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND ISC AND MIT AND Zlib |
+| numpy | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 |
+| filelock | 4.2.4 | MIT |
+| fsspec | 2026.9.0 | BSD-3-Clause |
+| Jinja2 | 3.1.6 | BSD-3-Clause |
+| MarkupSafe | 3.0.3 | BSD-3-Clause |
+| mpmath | 1.3.0 | BSD-3-Clause |
+| networkx | 3.7 | BSD-3-Clause |
+| setuptools | 78.1.0 | MIT |
+| sympy | 1.14.0 | BSD-3-Clause |
+| typing_extensions | 4.16.0 | PSF-2.0 |
+| pip | 25.0.1 | MIT |
+| Python | 3.12 | PSF-2.0 |
+
+Kornia requires torch and numpy. The torch install also brings in filelock, fsspec, Jinja2, MarkupSafe, mpmath, networkx, setuptools, sympy, and typing_extensions.
+
+The PyTorch project text is BSD-3-Clause. The CPU wheel metadata adds the other licences in its row. NumPy’s own text is BSD-3-Clause, and the wheel also includes 0BSD, MIT, Zlib, and CC0-1.0 code. setuptools is MIT, and a vendored autocommand copy in that package is LGPL-3.0. sympy is BSD-3-Clause, and its bundled latex2sympy parser is MIT.
+
+The image base is `python:3.12-slim`. Python is PSF-2.0. pip, which ships with that image, is MIT.
