@@ -1,0 +1,9 @@
+.DS_Store
+
+camera-app/.build/
+camera-app/.venv/
+
+frames/inbox/*
+!frames/inbox/.gitkeep
+frames/ready/*
+!frames/ready/.gitkeep

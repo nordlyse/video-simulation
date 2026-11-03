@@ -4,3 +4,6 @@ services:
   # torch and numpy are BSD-3-Clause and are required by Kornia.
   kornia:
     build: ./kornia
+    volumes:
+      - ./frames:/frames
+    command: ["python", "/app/capture.py"]
