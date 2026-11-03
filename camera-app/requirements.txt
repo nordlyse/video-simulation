@@ -1,0 +1,6 @@
+pyobjc-core==13.0
+pyobjc-framework-AVFoundation==13.0
+pyobjc-framework-Cocoa==13.0
+pyobjc-framework-CoreAudio==13.0
+pyobjc-framework-CoreMedia==13.0
+pyobjc-framework-Quartz==13.0

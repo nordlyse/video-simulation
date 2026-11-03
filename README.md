@@ -29,3 +29,17 @@ Kornia requires torch and numpy. The torch install also brings in filelock, fssp
 The PyTorch project text is BSD-3-Clause. The CPU wheel metadata adds the other licences in its row. NumPy’s own text is BSD-3-Clause, and the wheel also includes 0BSD, MIT, Zlib, and CC0-1.0 code. setuptools is MIT, and a vendored autocommand copy in that package is LGPL-3.0. sympy is BSD-3-Clause, and its bundled latex2sympy parser is MIT.
 
 The image base is `python:3.12-slim`. Python is PSF-2.0. pip, which ships with that image, is MIT.
+
+Kornia keeps only the person from the camera frame. MediaPipe 1.2.2 and its selfie segmenter model are Apache-2.0. The image also installs opencv-python-headless 5.0.0.93, absl-py 2.5.1 and flatbuffers 25.12.19, all Apache-2.0. MediaPipe imports certifi 2026.10.23, which is MPL-2.0, and matplotlib. If the frame has no person, the stored frame is empty.
+
+The local camera app is separate from Compose. It uses PyObjC 13.0, which is MIT:
+
+| Tool | Version | Licence |
+| --- | --- | --- |
+| pyobjc-core | 13.0 | MIT |
+| pyobjc-framework-AVFoundation | 13.0 | MIT |
+| pyobjc-framework-Cocoa | 13.0 | MIT |
+| pyobjc-framework-CoreAudio | 13.0 | MIT |
+| pyobjc-framework-CoreMedia | 13.0 | MIT |
+| pyobjc-framework-Quartz | 13.0 | MIT |
+| Python | 3.14 | PSF-2.0 |
