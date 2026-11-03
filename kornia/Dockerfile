@@ -10,6 +10,6 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
         "kornia @ https://github.com/kornia/kornia/archive/refs/tags/v0.9.0.tar.gz"
 
 WORKDIR /app
-COPY check.py capture.py /app/
+COPY capture.py /app/capture.py
 
-CMD ["python", "/app/check.py"]
+CMD ["python", "/app/capture.py"]
