@@ -1,6 +1,7 @@
 services:
   # https://github.com/kornia/kornia v0.9.0 (Apache-2.0).
   # kornia_rs is Apache-2.0.
+  # MediaPipe and its selfie segmenter are Apache-2.0.
   # torch and numpy are BSD-3-Clause and are required by Kornia.
   kornia:
     build: ./kornia

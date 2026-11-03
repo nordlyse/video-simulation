@@ -30,6 +30,8 @@ The PyTorch project text is BSD-3-Clause. The CPU wheel metadata adds the other 
 
 The image base is `python:3.12-slim`. Python is PSF-2.0. pip, which ships with that image, is MIT.
 
+Kornia keeps only the person from the camera frame. MediaPipe 1.2.2 and its selfie segmenter model are Apache-2.0. The image also installs opencv-python-headless 5.0.0.93, absl-py 2.5.1 and flatbuffers 25.12.19, all Apache-2.0. MediaPipe imports certifi 2026.10.23, which is MPL-2.0, and matplotlib. If the frame has no person, the stored frame is empty.
+
 The local camera app is separate from Compose. It uses PyObjC 13.0, which is MIT:
 
 | Tool | Version | Licence |
