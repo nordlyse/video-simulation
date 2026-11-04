@@ -7,3 +7,6 @@ frames/inbox/*
 !frames/inbox/.gitkeep
 frames/ready/*
 !frames/ready/.gitkeep
+
+media/*
+!media/.gitkeep

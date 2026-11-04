@@ -7,4 +7,5 @@ services:
     build: ./kornia
     volumes:
       - ./frames:/frames
+      - ./media:/media
     command: ["python", "/app/capture.py"]

@@ -32,6 +32,8 @@ The image base is `python:3.12-slim`. Python is PSF-2.0. pip, which ships with t
 
 Kornia keeps only the person from the camera frame. MediaPipe 1.2.2 and its selfie segmenter model are Apache-2.0. The image also installs opencv-python-headless 5.0.0.93, absl-py 2.5.1 and flatbuffers 25.12.19, all Apache-2.0. MediaPipe imports certifi 2026.10.23, which is MPL-2.0, and matplotlib. If the frame has no person, the stored frame is empty.
 
+The erupting volcano is a short section of the 8 April 2025 Kanlaon eruption, filmed by the PHIVOLCS camera at Lower Masulog, Canlaon City. The recording is a Philippine government work and is in the public domain: https://commons.wikimedia.org/wiki/File:An_explosive_eruption_occurred_at_Kanlaon_Volcano_on_April_8,_2025_(full_view).webm. Keep the recording locally at `media/kanlaon.webm`. It is not stored in git. The extracted person is placed in the foreground. Lava runs down the cone and across the foreground, and the cutout is shaded from that light: the side toward the flow is warmer, the far side is darker, and the near flow crosses the body. The result is `frames/ready/volcano.mp4`.
+
 The local camera app is separate from Compose. It uses PyObjC 13.0, which is MIT:
 
 | Tool | Version | Licence |
