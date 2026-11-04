@@ -25,6 +25,6 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY capture.py /app/capture.py
+COPY capture.py place.py /app/
 
 CMD ["python", "/app/capture.py"]
