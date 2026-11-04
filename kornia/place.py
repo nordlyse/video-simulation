@@ -72,40 +72,56 @@ def flow_field(points, height, width):
     return dist, along, travel
 
 
-def flow_heat(dist, along, length, radius, index, noise):
-    """Return melt heat and the opaque crust footprint."""
-    span = np.clip(1 - dist / radius, 0, 1)
-    center = np.clip(1 - dist / (radius * 0.30), 0, 1)
-    nh, nw = noise.shape
-    map_x = np.clip(dist / radius * (nw - 1), 0, nw - 1).astype(np.float32)
-    map_y = np.mod(along / max(length, 1) * (nh * 0.45) - index * 7.5, nh).astype(np.float32)
-    grain = cv2.remap(noise, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-    cover = np.clip(span ** 0.85, 0, 0.92)
-    cover[dist >= radius] = 0
-    crust = cover * (0.34 + 0.2 * grain)
-    core = (center ** 1.5) * (0.7 + 0.3 * grain)
-    heat = np.clip(np.maximum(crust, core), 0, 1).astype(np.float32)
-    return heat, cover.astype(np.float32)
+def build_fbm(height, width, rng, octaves):
+    """Layered noise. Low octaves are broad lobes, high octaves are cracks."""
+    total = np.zeros((height, width), np.float32)
+    weight = 0.0
+    amplitude = 1.0
+    for level in range(octaves):
+        cells_y = max(2, height // (2 ** (level + 3)))
+        cells_x = max(2, width // (2 ** (level + 3)))
+        grid = rng.random((cells_y, cells_x), dtype=np.float32)
+        layer = cv2.resize(grid, (width, height), interpolation=cv2.INTER_CUBIC)
+        total += layer * amplitude
+        weight += amplitude
+        amplitude *= 0.55
+    return total / weight
 
 
-def lava_color(heat):
-    flat = heat.reshape(-1)
-    blue = np.interp(flat, [0, 0.25, 0.5, 0.75, 1], [8, 12, 16, 36, 150])
-    green = np.interp(flat, [0, 0.25, 0.5, 0.75, 1], [12, 22, 55, 125, 215])
-    red = np.interp(flat, [0, 0.25, 0.5, 0.75, 1], [36, 70, 150, 225, 255])
-    return np.stack([blue, green, red], axis=-1).reshape(heat.shape + (3,)).astype(np.float32)
+def scrolled(field, index, speed, height):
+    rolled = np.roll(field, int(index * speed), axis=0)
+    return rolled[:height]
 
 
-def screen_lava(frame, color, heat):
-    """Lay a hot core and a soft glow over the picture. Kornia blurs the glow."""
-    color_t = torch.from_numpy(np.ascontiguousarray(color / 255)).permute(2, 0, 1).unsqueeze(0)
-    heat_t = torch.from_numpy(np.ascontiguousarray(heat)).unsqueeze(0).unsqueeze(0)
-    frame_t = torch.from_numpy(frame).permute(2, 0, 1).unsqueeze(0).float() / 255
-    glow = kornia.filters.gaussian_blur2d(color_t, (21, 21), (5.0, 5.0))
-    lit = 1 - (1 - frame_t) * (1 - glow.clamp(0, 1) * 0.32)
-    cover = heat_t.clamp(0, 1)
-    mixed = lit * (1 - cover) + color_t.clamp(0, 1) * cover
-    return (mixed.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
+def flow_heat(dist, radius, lobe, cracks):
+    """Dark crust with a few molten channels running downhill."""
+    limit = radius * (0.72 + 0.5 * lobe)
+    cover = np.clip((limit - dist) / (radius * 0.28), 0, 1)
+    cover[dist >= limit] = 0
+    height, width = cracks.shape
+    slim = cv2.resize(cracks, (max(8, width // 7), height), interpolation=cv2.INTER_AREA)
+    rivers = cv2.resize(slim, (width, height), interpolation=cv2.INTER_LINEAR)
+    heat = np.clip((rivers - 0.57) * 5.0, 0, 1)
+    heat[cover < 0.45] = 0
+    return heat.astype(np.float32), cover.astype(np.float32)
+
+
+def paint_sheet(frame, cover, heat):
+    """Darken the ground into crust and light only the cracks."""
+    picture = frame.astype(np.float32)
+    crust = picture * np.array([0.28, 0.22, 0.42], np.float32)
+    glow_color = np.array([40, 120, 255], np.float32)
+    core_color = np.array([170, 235, 255], np.float32)
+    melt = glow_color * (1 - heat[..., None]) + core_color * heat[..., None]
+    lava = crust * (1 - heat[..., None]) + melt * heat[..., None]
+    cover_c = np.clip(cover, 0, 1)[..., None]
+    mixed = picture * (1 - cover_c) + lava * cover_c
+    hot = (melt / 255) * heat[..., None]
+    hot_t = torch.from_numpy(np.ascontiguousarray(hot)).permute(2, 0, 1).unsqueeze(0)
+    glow = kornia.filters.gaussian_blur2d(hot_t, (21, 21), (6.0, 6.0))
+    base = torch.from_numpy(np.ascontiguousarray(mixed / 255)).permute(2, 0, 1).unsqueeze(0)
+    lit = 1 - (1 - base) * (1 - glow.clamp(0, 1) * 0.65)
+    return (lit.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
 
 
 def add_contact_shadow(frame, x, y, width, height):
@@ -152,24 +168,23 @@ def shade_sprite(sprite, heat):
 
 
 def lava_paths(width, height, sprite):
-    slope = scale_points(width, height, ((0.48, 0.57), (0.50, 0.66), (0.54, 0.74), (0.60, 0.82)))
-    branch = scale_points(width, height, ((0.51, 0.59), (0.58, 0.68), (0.66, 0.76), (0.74, 0.84)))
+    slope = scale_points(width, height, ((0.48, 0.56), (0.50, 0.62), (0.53, 0.68)))
+    branch = scale_points(width, height, ((0.50, 0.58), (0.56, 0.64), (0.61, 0.70)))
     if sprite is None:
         front = scale_points(width, height, ((0.68, 0.88), (0.80, 0.93), (0.92, 0.97)))
     else:
         x, y, sprite_width, sprite_height = sprite_box(width, height, sprite)
         front = (
-            (x + sprite_width * 0.02, y + sprite_height * 0.78),
-            (x + sprite_width * 0.40, y + sprite_height * 0.88),
-            (x + sprite_width * 0.82, y + sprite_height * 0.96),
+            (x + sprite_width * 0.08, y + sprite_height * 0.84),
+            (x + sprite_width * 0.48, y + sprite_height * 0.92),
+            (x + sprite_width * 0.88, y + sprite_height * 0.98),
         )
     return slope, branch, front
 
 
-def lay_flow(frame, field, radius, index, noise):
-    dist, along, length = field
-    heat, cover = flow_heat(dist, along, length, radius, index, noise)
-    return screen_lava(frame, lava_color(heat), cover), heat
+def lay_flow(frame, field, radius, lobe, cracks):
+    heat, cover = flow_heat(field[0], radius, lobe, cracks)
+    return paint_sheet(frame, cover, heat), heat
 
 
 def sprite_box(frame_width, frame_height, sprite):
@@ -232,8 +247,9 @@ def main():
     slope = flow_field(slope_pts, height, width)
     branch = flow_field(branch_pts, height, width)
     front = flow_field(front_pts, height, width)
-    noise = np.random.default_rng(3).random((480, 96), dtype=np.float32)
-    noise = cv2.GaussianBlur(noise, (0, 0), 1.1)
+    rng = np.random.default_rng(3)
+    lobe_field = build_fbm(height + 480, width, rng, 3)
+    crack_field = build_fbm(height + 480, width, rng, 5)
     capture.set(cv2.CAP_PROP_POS_MSEC, START_SEC * 1000)
     frame_count = int(round(SECONDS * fps))
     writer, path = open_writer(width, height, fps)
@@ -245,18 +261,20 @@ def main():
             ok, frame = capture.read()
             if not ok:
                 break
-            frame, slope_heat = lay_flow(frame, slope, 34, index, noise)
-            frame, branch_heat = lay_flow(frame, branch, 20, index, noise)
+            lobe = scrolled(lobe_field, index, 1.2, height)
+            cracks = scrolled(crack_field, index, 2.4, height)
+            frame, slope_heat = lay_flow(frame, slope, 78, lobe, cracks)
+            frame, branch_heat = lay_flow(frame, branch, 46, lobe, cracks)
             if sprite is not None:
                 sx, sy, sw, sh = sprite_box(width, height, sprite)
                 add_contact_shadow(frame, sx, sy, sw, sh)
-            front_heat, front_cover = flow_heat(front[0], front[1], front[2], 16, index, noise)
+            front_heat, front_cover = flow_heat(front[0], 34, lobe, cracks)
             if sprite is not None:
                 sx, sy, sw, sh = sprite_box(width, height, sprite)
                 near = np.maximum(slope_heat[sy : sy + sh, sx : sx + sw], branch_heat[sy : sy + sh, sx : sx + sw])
                 near = np.maximum(near, front_heat[sy : sy + sh, sx : sx + sw])
                 placed = paste_person(frame, shade_sprite(sprite, near))
-            frame = screen_lava(frame, lava_color(front_heat), front_cover)
+            frame = paint_sheet(frame, front_cover, front_heat)
             writer.write(frame)
             written += 1
             if index == frame_count // 2:
