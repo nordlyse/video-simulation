@@ -1,7 +1,7 @@
 """Place the extracted person in a vector eruption.
 
-A shaded cone, a billowing ash column, and a widening lava sheet.
-Lava leaves the vent, runs down the face, and spreads on the plain.
+A shaded cone, a billowing ash column, and jagged lava channels.
+Lava leaves the vent, runs down the face, and splits into fingers.
 """
 
 from pathlib import Path
@@ -9,7 +9,6 @@ from pathlib import Path
 import cv2
 import kornia
 import numpy as np
-import torch
 
 ready = Path("/frames/ready")
 person_path = ready / "live.png"
@@ -50,28 +49,6 @@ def scale_points(width, height, pairs):
     return [(x * width, y * height) for x, y in pairs]
 
 
-def flow_field(points, height, width):
-    """Distance from each pixel to a lava channel, and distance along it."""
-    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
-    dist = np.full((height, width), np.float32(1e6))
-    along = np.zeros((height, width), np.float32)
-    travel = 0.0
-    for (x0, y0), (x1, y1) in zip(points, points[1:]):
-        vx = float(x1 - x0)
-        vy = float(y1 - y0)
-        length = float(np.hypot(vx, vy)) + 1e-6
-        t = ((xx - x0) * vx + (yy - y0) * vy) / (length * length)
-        np.clip(t, 0, 1, out=t)
-        px = x0 + t * vx
-        py = y0 + t * vy
-        segment = np.hypot(xx - px, yy - py).astype(np.float32)
-        closer = segment < dist
-        np.copyto(dist, segment, where=closer)
-        np.copyto(along, np.float32(travel) + t * length, where=closer)
-        travel += length
-    return dist, along, travel
-
-
 def build_fbm(height, width, rng, octaves):
     """Layered noise. Low octaves are broad lobes, high octaves are cracks."""
     total = np.zeros((height, width), np.float32)
@@ -91,11 +68,6 @@ def build_fbm(height, width, rng, octaves):
 def scrolled(field, index, speed, height):
     rolled = np.roll(field, int(index * speed), axis=0)
     return rolled[:height]
-
-
-def smoothstep(value):
-    shaped = np.clip(value, 0, 1)
-    return shaped * shaped * (3 - 2 * shaped)
 
 
 def build_backdrop(grain):
@@ -208,62 +180,126 @@ def add_bombs(frame, index):
         y2 = CRATER[1] - speed * earlier + 2.35 * earlier * earlier
         if not (0 <= x < WIDTH and 0 <= y < HEIGHT):
             continue
-        cv2.line(frame, (int(x2), int(y2)), (int(x), int(y)), (28, 80, 190), 2, cv2.LINE_AA)
-        blend_disc(frame, x, y, 3 + step % 2, (150, 220, 255), 0.95)
+        cv2.line(frame, (int(x2), int(y2)), (int(x), int(y)), (40, 120, 230), 2, cv2.LINE_AA)
 
 
-def lava_paths(width, height):
-    """A front sheet, a left tongue, and a short run down the right face."""
-    front = scale_points(
-        width,
-        height,
-        ((0.52, 0.36), (0.48, 0.52), (0.42, 0.68), (0.34, 0.84), (0.28, 0.97)),
+def lava_channels(width, height):
+    """Narrow channels. They stay long, then split into pointed fingers."""
+    return (
+        (
+            scale_points(width, height, ((0.51, 0.36), (0.48, 0.50), (0.44, 0.66), (0.38, 0.82), (0.32, 0.98))),
+            18,
+            26,
+            0.4,
+        ),
+        (
+            scale_points(width, height, ((0.52, 0.40), (0.50, 0.56), (0.46, 0.72), (0.40, 0.86), (0.36, 0.99))),
+            14,
+            20,
+            1.3,
+        ),
+        (
+            scale_points(width, height, ((0.49, 0.50), (0.40, 0.66), (0.30, 0.82), (0.22, 0.98))),
+            12,
+            16,
+            2.1,
+        ),
+        (
+            scale_points(width, height, ((0.45, 0.70), (0.36, 0.84), (0.30, 0.98))),
+            10,
+            14,
+            2.8,
+        ),
+        (
+            scale_points(width, height, ((0.54, 0.38), (0.60, 0.50), (0.67, 0.61))),
+            10,
+            14,
+            0.7,
+        ),
     )
-    tongue = scale_points(
-        width,
-        height,
-        ((0.49, 0.48), (0.38, 0.64), (0.28, 0.80), (0.20, 0.96)),
-    )
-    right = scale_points(
-        width,
-        height,
-        ((0.54, 0.38), (0.60, 0.50), (0.66, 0.60)),
-    )
-    return front, tongue, right
 
 
-def sheet_masks(dist, along, travel, lobe, crust, scale):
-    """An orange sheet. Dark plates float on it and the toe only brightens a little."""
-    progress = np.clip(along / max(travel, 1.0), 0, 1)
-    radius = (22 + np.power(progress, 1.05) * 96 * scale) * (0.78 + 0.36 * lobe)
-    cover = smoothstep((radius - dist) / 18.0)
-    center = np.clip(1 - dist / (radius * 0.85 + 1e-3), 0, 1)
-    molten = cover * (0.42 + 0.5 * center)
-    plates = np.clip((crust - 0.5) * 2.6, 0, 1) * cover
-    melt = molten * (1 - plates * 0.8)
-    rim = smoothstep((progress - 0.84) / 0.16) * np.clip(1 - dist / (radius * 0.55 + 1e-3), 0, 1)
-    melt = np.clip(melt + rim * 0.22, 0, 0.88)
-    return melt.astype(np.float32), cover.astype(np.float32)
+def path_samples(points, count):
+    pts = np.asarray(points, np.float32)
+    if len(pts) < 2:
+        return pts, np.zeros(len(pts), np.float32), np.zeros((len(pts), 2), np.float32)
+    steps = np.hypot(np.diff(pts[:, 0]), np.diff(pts[:, 1]))
+    travel = np.concatenate([[0], np.cumsum(steps)])
+    total = float(travel[-1])
+    marks = np.linspace(0, total, count)
+    pos = np.empty((count, 2), np.float32)
+    tangent = np.empty((count, 2), np.float32)
+    progress = marks / max(total, 1e-6)
+    for i, mark in enumerate(marks):
+        k = int(np.searchsorted(travel, mark, side="right") - 1)
+        k = min(max(k, 0), len(pts) - 2)
+        span = float(travel[k + 1] - travel[k])
+        blend = 0.0 if span < 1e-4 else (mark - float(travel[k])) / span
+        pos[i] = pts[k] * (1 - blend) + pts[k + 1] * blend
+        direction = pts[k + 1] - pts[k]
+        tangent[i] = direction / (float(np.hypot(direction[0], direction[1])) + 1e-6)
+    return pos, progress, tangent
 
 
-def paint_lava(frame, cover, melt):
-    """Deep red under orange. The glow warms the rock and stays off the white core."""
-    picture = frame.astype(np.float32)
-    crust = np.array([8, 12, 48], np.float32)
-    orange = np.array([18, 72, 220], np.float32)
-    yellow = np.array([40, 150, 255], np.float32)
-    hot = melt[..., None]
-    color = crust * (1 - hot) + orange * hot
-    core = np.clip((melt - 0.62) / 0.38, 0, 1)[..., None]
-    color = color * (1 - core) + yellow * core
-    alpha = cover[..., None]
-    mixed = picture * (1 - alpha) + color * alpha
-    glow_bgr = (orange / 255.0) * np.clip(melt, 0, 1)[..., None]
-    glow_t = torch.from_numpy(np.ascontiguousarray(glow_bgr)).permute(2, 0, 1).unsqueeze(0)
-    glow = kornia.filters.gaussian_blur2d(glow_t, (21, 21), (6.0, 6.0))
-    base = torch.from_numpy(np.ascontiguousarray(mixed / 255.0)).permute(2, 0, 1).unsqueeze(0)
-    lit = 1 - (1 - base) * (1 - glow.clamp(0, 1) * 0.38)
-    return (lit.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
+def meander(pos, tangent, phase):
+    """Shift the center sideways so the channel bends without swelling into beads."""
+    out = pos.copy()
+    for i in range(len(pos)):
+        nx = -float(tangent[i, 1])
+        ny = float(tangent[i, 0])
+        shift = np.sin(i * 0.48 + phase) * 8 + np.sin(i * 1.15 + phase * 1.4) * 4
+        out[i, 0] += nx * shift
+        out[i, 1] += ny * shift
+    return out
+
+
+def jagged_strip(pos, progress, tangent, start_w, end_w, phase, inner):
+    """Even width, a small torn edge, and a pointed end."""
+    left = []
+    right = []
+    for i in range(len(pos)):
+        nx = -float(tangent[i, 1])
+        ny = float(tangent[i, 0])
+        width = start_w + (end_w - start_w) * float(progress[i])
+        if progress[i] > 0.88:
+            width *= 1 - (float(progress[i]) - 0.88) / 0.12 * 0.75
+        if inner:
+            width *= 0.46
+        jag = np.sin(i * 2.4 + phase) * 0.1 + np.sin(i * 5.2 + phase * 1.3) * 0.05
+        half = max(1.8, width * (1.0 + jag))
+        left.append((pos[i, 0] + nx * half, pos[i, 1] + ny * half))
+        right.append((pos[i, 0] - nx * half, pos[i, 1] - ny * half))
+    if len(left) < 2:
+        return None
+    return np.array(left + right[::-1], np.int32)
+
+
+def paint_channels(frame, index):
+    """Dark banks around a continuous bright core."""
+    crust_color = (14, 16, 42)
+    molten_color = (22, 96, 235)
+    heat = np.zeros(frame.shape[:2], np.float32)
+    banks = []
+    cores = []
+    for points, start_w, end_w, phase in lava_channels(WIDTH, HEIGHT):
+        pos, progress, tangent = path_samples(points, 42)
+        pos = meander(pos, tangent, phase + index * 0.35)
+        bank = jagged_strip(pos, progress, tangent, start_w, end_w, phase + index * 0.35, False)
+        core = jagged_strip(pos, progress, tangent, start_w, end_w, phase + index * 0.35, True)
+        if bank is not None:
+            banks.append(bank)
+        if core is not None:
+            cores.append(core)
+    if banks:
+        cv2.fillPoly(frame, banks, crust_color)
+    if cores:
+        cv2.fillPoly(frame, cores, molten_color)
+        cv2.fillPoly(heat, cores, 1)
+    fringe = cv2.GaussianBlur(heat, (5, 5), 1.1)
+    fringe = np.clip(fringe - heat, 0, 1)
+    warm = fringe[..., None] * np.array([10, 40, 90], np.float32)
+    frame[:] = np.clip(frame.astype(np.float32) + warm, 0, 255).astype(np.uint8)
+    return heat
 
 
 def add_contact_shadow(frame, x, y, width, height):
@@ -360,32 +396,13 @@ def open_writer(width, height, fps):
     raise SystemExit("The video writer did not open.")
 
 
-def downhill_noise(field, index, speed, cells):
-    """Scroll a field downward and stretch it into long channels."""
-    rolled = scrolled(field, index, speed, HEIGHT)
-    slim = cv2.resize(rolled, (max(8, WIDTH // cells), max(8, HEIGHT // cells)), interpolation=cv2.INTER_AREA)
-    return cv2.resize(slim, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
-
-
-def compose_frame(index, sprite, front, tongue, right, lobe_field, crack_field, backdrop):
+def compose_frame(index, sprite, lobe_field, backdrop):
     frame = backdrop.copy()
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
     add_plume(frame, index, billow)
     add_crater(frame, index)
     add_bombs(frame, index)
-    lobe = downhill_noise(lobe_field, index, 1.0, 10)
-    crust = downhill_noise(crack_field, index, 2.6, 5)
-    sheets = (
-        sheet_masks(front[0], front[1], front[2], lobe, crust, 1.2),
-        sheet_masks(tongue[0], tongue[1], tongue[2], lobe, crust, 0.85),
-        sheet_masks(right[0], right[1], right[2], lobe, crust, 0.45),
-    )
-    melt = sheets[0][0]
-    cover = sheets[0][1]
-    for part_melt, part_cover in sheets[1:]:
-        melt = np.maximum(melt, part_melt)
-        cover = np.maximum(cover, part_cover)
-    frame = paint_lava(frame, cover, melt)
+    melt = paint_channels(frame, index)
     placed = False
     if sprite is not None:
         sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
@@ -402,23 +419,16 @@ def compose_frame(index, sprite, front, tongue, right, lobe_field, crack_field, 
 def main():
     ready.mkdir(parents=True, exist_ok=True)
     sprite = person_sprite(WIDTH, HEIGHT)
-    front_pts, tongue_pts, right_pts = lava_paths(WIDTH, HEIGHT)
-    front = flow_field(front_pts, HEIGHT, WIDTH)
-    tongue = flow_field(tongue_pts, HEIGHT, WIDTH)
-    right = flow_field(right_pts, HEIGHT, WIDTH)
     rng = np.random.default_rng(3)
     grain = build_fbm(HEIGHT, WIDTH, rng, 4)
     backdrop = build_backdrop(grain)
     lobe_field = build_fbm(HEIGHT + 360, WIDTH, rng, 3)
-    crack_field = build_fbm(HEIGHT + 360, WIDTH, rng, 5)
     writer, path = open_writer(WIDTH, HEIGHT, FPS)
     preview = None
     placed = False
     try:
         for index in range(FRAMES):
-            frame, placed = compose_frame(
-                index, sprite, front, tongue, right, lobe_field, crack_field, backdrop
-            )
+            frame, placed = compose_frame(index, sprite, lobe_field, backdrop)
             writer.write(frame)
             if index == FRAMES // 2:
                 preview = frame
