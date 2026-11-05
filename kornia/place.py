@@ -116,46 +116,25 @@ def build_backdrop(grain):
     lit = np.array([64, 74, 104], np.float32)
     rock = shadow * (1 - light[..., None]) + lit * light[..., None]
     rock *= (0.78 + 0.36 * gullies)[..., None]
-    limb = np.clip((np.abs(flank) - 0.78) / 0.22, 0, 1)
-    rock *= (1 - limb * 0.5)[..., None]
+    limb = np.clip((np.abs(flank) - 0.9) / 0.1, 0, 1)
+    rock *= (1 - limb * 0.18)[..., None]
     trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
     rock *= (1 - trough * 0.28)[..., None]
-    for base_x, amount in ((80, 0.72), (220, -0.5), (360, 0.48), (620, 0.7), (760, -0.58), (900, 0.62)):
+    for base_x, amount in ((80, 0.28), (220, -0.18), (360, 0.22), (620, 0.24), (760, -0.16), (900, 0.2)):
         x0, y0 = apex_x, apex_y + 16
         x1, y1 = float(base_x), BASE_Y + 8
         vx, vy = x1 - x0, y1 - y0
         length = float(np.hypot(vx, vy)) + 1e-6
         along = ((xx - x0) * vx + (yy - y0) * vy) / (length * length)
         dist = np.abs((xx - x0) * vy - (yy - y0) * vx) / length
-        span_w = 8 + 32 * np.clip(along, 0, 1)
+        span_w = 18 + 48 * np.clip(along, 0, 1)
         fall = np.clip(1 - dist / (span_w + 1e-3), 0, 1) ** 2
         band = (along > 0.05) & (along < 1.02) & cone
         shade = np.where(band, fall, 0).astype(np.float32)
         if amount > 0:
             rock *= (1 - shade * amount)[..., None]
         else:
-            rock += (shade * (-amount) * 95)[..., None]
-    for base_x, color in (
-        (120, (14, 12, 16)),
-        (260, (76, 86, 122)),
-        (400, (12, 10, 14)),
-        (760, (82, 92, 128)),
-        (880, (14, 12, 16)),
-        (980, (78, 88, 120)),
-    ):
-        mask = np.zeros((HEIGHT, WIDTH), np.uint8)
-        poly = np.array(
-            [
-                (int(apex_x) - 4, int(apex_y) + 24),
-                (int(apex_x) + 4, int(apex_y) + 24),
-                (base_x + 16, int(BASE_Y) + 4),
-                (base_x - 12, int(BASE_Y) + 4),
-            ],
-            np.int32,
-        )
-        cv2.fillPoly(mask, [poly], 1)
-        on_face = (mask > 0) & cone & (np.abs(flank) < 0.78)
-        rock[on_face] = np.array(color, np.float32)
+            rock += (shade * (-amount) * 42)[..., None]
     frame[cone] = np.clip(rock, 0, 255)[cone]
 
     ground = (yy >= 492) & ~cone
@@ -253,30 +232,30 @@ def add_fountain(frame, index):
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 132
     stem = np.array(
-        [[cx - 18, cy - 4], [cx + 18, cy - 4], [cx + 26, cap_y + 16], [cx - 26, cap_y + 16]],
+        [[cx - 34, cy - 4], [cx + 34, cy - 4], [cx + 48, cap_y + 18], [cx - 48, cap_y + 18]],
         np.int32,
     )
     cv2.fillPoly(frame, [stem], (28, 110, 240))
-    cv2.ellipse(frame, (int(cx), int(cap_y)), (86, 30), 0, 0, 360, (46, 160, 255), -1)
-    cv2.ellipse(frame, (int(cx), int(cap_y - 4)), (48, 16), 0, 0, 360, (90, 210, 255), -1)
+    cv2.ellipse(frame, (int(cx), int(cap_y)), (124, 44), 0, 0, 360, (46, 160, 255), -1)
+    cv2.ellipse(frame, (int(cx), int(cap_y - 6)), (72, 24), 0, 0, 360, (90, 210, 255), -1)
     for step in range(16):
         travel = (step * 9 + index * 2.4) % 128
         y = cy - 6 - travel
-        if y < cap_y + 8:
+        if y < cap_y + 10:
             continue
-        x = cx + np.sin(step * 1.4 + index * 0.2) * 8
-        paint_chunk(frame, x, y, 7, (70, 190, 255), step)
+        x = cx + np.sin(step * 1.4 + index * 0.2) * 16
+        paint_chunk(frame, x, y, 10, (70, 190, 255), step)
     for step in range(18):
         side = -1.0 if step < 9 else 1.0
         slot = step % 9
-        spread = 12 + (slot * 8 + index * 1.6) % 74
+        spread = 16 + (slot * 12 + index * 1.6) % 108
         x = cx + side * spread
-        y = cap_y - 6 + (spread / 86) * 10
-        paint_chunk(frame, x, y, 8, (64, 184, 255), step * 0.5)
+        y = cap_y - 8 + (spread / 124) * 14
+        paint_chunk(frame, x, y, 11, (64, 184, 255), step * 0.5)
     for side in (-1.0, 1.0):
         for slot in range(7):
             fall = (slot * 16 + index * 1.15) % 120
-            x = cx + side * (78 + fall * 0.22)
+            x = cx + side * (112 + fall * 0.22)
             y = cap_y + 8 + 0.011 * fall * fall + slot * 3
             if y > cy + 150:
                 continue
