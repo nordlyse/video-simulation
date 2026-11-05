@@ -1,10 +1,7 @@
-"""Place the extracted person in a short recording of a real eruption.
+"""Place the extracted person in a vector eruption.
 
-The background is the 8 April 2025 Kanlaon eruption, filmed by the
-PHIVOLCS camera at Lower Masulog, Canlaon City. The recording is a
-Philippine government work and is in the public domain.
-
-https://commons.wikimedia.org/wiki/File:An_explosive_eruption_occurred_at_Kanlaon_Volcano_on_April_8,_2025_(full_view).webm
+Ash rises from the crater. Lava leaves the vent, runs down the cone,
+and spreads on the ground.
 """
 
 from pathlib import Path
@@ -16,13 +13,14 @@ import torch
 
 ready = Path("/frames/ready")
 person_path = ready / "live.png"
-background_path = Path("/media/kanlaon.webm")
 video_path = ready / "volcano.mp4"
 preview_path = ready / "volcano.png"
 
-# The plume is rising through this part of the recording.
-START_SEC = 10
-SECONDS = 8
+WIDTH = 960
+HEIGHT = 540
+FPS = 12
+FRAMES = FPS * 6
+CRATER = (480, 198)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
 
@@ -167,16 +165,100 @@ def shade_sprite(sprite, heat):
     return out
 
 
+def blend_disc(frame, x, y, radius, color, alpha):
+    if radius < 1 or alpha <= 0:
+        return
+    height, width = frame.shape[:2]
+    x0 = max(0, int(x) - radius)
+    y0 = max(0, int(y) - radius)
+    x1 = min(width, int(x) + radius + 1)
+    y1 = min(height, int(y) + radius + 1)
+    if x0 >= x1 or y0 >= y1:
+        return
+    yy, xx = np.ogrid[y0:y1, x0:x1]
+    mask = ((xx - x) ** 2 + (yy - y) ** 2) <= radius * radius
+    roi = frame[y0:y1, x0:x1]
+    mixed = roi.copy()
+    mixed[mask] = (alpha * np.array(color, np.float32) + (1 - alpha) * roi[mask]).astype(np.uint8)
+    frame[y0:y1, x0:x1] = mixed
+
+
+def draw_vector_scene():
+    """Sky, ridges, and a cone built from flat shapes."""
+    frame = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
+    lift = np.linspace(0, 1, HEIGHT, dtype=np.float32)[:, None]
+    frame[:, :, 0] = (92 * (1 - lift) + 168 * lift).astype(np.uint8)
+    frame[:, :, 1] = (62 * (1 - lift) + 118 * lift).astype(np.uint8)
+    frame[:, :, 2] = (48 * (1 - lift) + 92 * lift).astype(np.uint8)
+    ridge = np.array(
+        [[0, 330], [180, 280], [360, 310], [560, 250], [780, 300], [WIDTH, 270], [WIDTH, 430], [0, 430]],
+        np.int32,
+    )
+    cv2.fillPoly(frame, [ridge], (58, 62, 74))
+    cone = np.array(
+        [[70, 438], [330, 248], [448, 188], [518, 188], [680, 260], [910, 438]],
+        np.int32,
+    )
+    cv2.fillPoly(frame, [cone], (42, 46, 58))
+    lit_face = np.array([[480, 190], [518, 188], [760, 438], [470, 438]], np.int32)
+    cv2.fillPoly(frame, [lit_face], (36, 48, 72))
+    cv2.rectangle(frame, (0, 430), (WIDTH, HEIGHT), (28, 46, 34), -1)
+    cv2.ellipse(frame, CRATER, (46, 16), 0, 0, 360, (18, 42, 90), -1)
+    cv2.ellipse(frame, CRATER, (28, 9), 0, 0, 360, (30, 90, 255), -1)
+    return frame
+
+
+def add_plume(frame, index):
+    """Rising ash. Overlapping puffs are blurred into one column."""
+    layer = np.zeros_like(frame)
+    cx, cy = CRATER
+    life = 8.0
+    for step in range(26):
+        age = (index * 0.42 + step * (life / 26)) % life
+        rise = age / life
+        y = int(cy - 6 - rise * (HEIGHT * 0.48))
+        spread = 6 + rise * 54
+        x = int(cx + np.sin(step * 2.05 + index * 0.18) * spread * 0.28)
+        radius = int(22 + rise * 48)
+        tone = int(28 + rise * 100)
+        color = (max(0, tone - 14), max(0, tone - 6), min(255, tone + 4))
+        if radius > 1:
+            cv2.circle(layer, (x, y), radius, color, -1)
+    soft = cv2.GaussianBlur(layer, (41, 41), 12)
+    alpha = np.clip(soft.max(axis=2).astype(np.float32) / 140, 0, 0.78)[..., None]
+    frame[:] = (frame.astype(np.float32) * (1 - alpha) + soft.astype(np.float32) * alpha).astype(np.uint8)
+
+
+def add_bombs(frame, index):
+    """Hot fragments thrown from the vent on short arcs."""
+    for step in range(9):
+        age = (index * 0.35 + step * 1.15) % 5.2
+        direction = (step - 4) * 4.4
+        x = CRATER[0] + direction * age
+        y = CRATER[1] - 16 * age + 2.1 * age * age
+        if not (0 <= x < WIDTH and 0 <= y < HEIGHT):
+            continue
+        blend_disc(frame, x, y, 4, (35, 130, 255), 0.9)
+
+
 def lava_paths(width, height, sprite):
-    slope = scale_points(width, height, ((0.48, 0.56), (0.50, 0.62), (0.53, 0.68)))
-    branch = scale_points(width, height, ((0.50, 0.58), (0.56, 0.64), (0.61, 0.70)))
+    slope = scale_points(
+        width,
+        height,
+        ((0.50, 0.38), (0.47, 0.52), (0.42, 0.68), (0.34, 0.86)),
+    )
+    branch = scale_points(
+        width,
+        height,
+        ((0.50, 0.62), (0.55, 0.78), (0.62, 0.90)),
+    )
     if sprite is None:
-        front = scale_points(width, height, ((0.68, 0.88), (0.80, 0.93), (0.92, 0.97)))
+        front = scale_points(width, height, ((0.62, 0.86), (0.76, 0.92), (0.90, 0.98)))
     else:
         x, y, sprite_width, sprite_height = sprite_box(width, height, sprite)
         front = (
-            (x + sprite_width * 0.08, y + sprite_height * 0.84),
-            (x + sprite_width * 0.48, y + sprite_height * 0.92),
+            (x + sprite_width * 0.05, y + sprite_height * 0.82),
+            (x + sprite_width * 0.45, y + sprite_height * 0.91),
             (x + sprite_width * 0.88, y + sprite_height * 0.98),
         )
     return slope, branch, front
@@ -226,69 +308,56 @@ def open_writer(width, height, fps):
     raise SystemExit("The video writer did not open.")
 
 
+def compose_frame(index, sprite, slope, branch, front, lobe_field, crack_field):
+    frame = draw_vector_scene()
+    add_plume(frame, index)
+    add_bombs(frame, index)
+    lobe = scrolled(lobe_field, index, 1.1, HEIGHT)
+    cracks = scrolled(crack_field, index, 2.2, HEIGHT)
+    frame, slope_heat = lay_flow(frame, slope, 36, lobe, cracks)
+    frame, branch_heat = lay_flow(frame, branch, 48, lobe, cracks)
+    if sprite is not None:
+        sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
+        add_contact_shadow(frame, sx, sy, sw, sh)
+    front_heat, front_cover = flow_heat(front[0], 22, lobe, cracks)
+    placed = False
+    if sprite is not None:
+        sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
+        near = np.maximum(slope_heat[sy : sy + sh, sx : sx + sw], branch_heat[sy : sy + sh, sx : sx + sw])
+        near = np.maximum(near, front_heat[sy : sy + sh, sx : sx + sw])
+        placed = paste_person(frame, shade_sprite(sprite, near))
+    frame = paint_sheet(frame, front_cover, front_heat)
+    return frame, placed
+
+
 def main():
-    if not background_path.is_file():
-        raise SystemExit(f"Missing volcano recording: {background_path}")
     ready.mkdir(parents=True, exist_ok=True)
-    capture = cv2.VideoCapture(str(background_path))
-    if not capture.isOpened():
-        raise SystemExit(f"The volcano recording did not open: {background_path}")
-
-    fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
-    if fps <= 0:
-        fps = 30.0
-    width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    if width < 2 or height < 2:
-        raise SystemExit("The volcano recording has no picture.")
-
-    sprite = person_sprite(width, height)
-    slope_pts, branch_pts, front_pts = lava_paths(width, height, sprite)
-    slope = flow_field(slope_pts, height, width)
-    branch = flow_field(branch_pts, height, width)
-    front = flow_field(front_pts, height, width)
+    sprite = person_sprite(WIDTH, HEIGHT)
+    slope_pts, branch_pts, front_pts = lava_paths(WIDTH, HEIGHT, sprite)
+    slope = flow_field(slope_pts, HEIGHT, WIDTH)
+    branch = flow_field(branch_pts, HEIGHT, WIDTH)
+    front = flow_field(front_pts, HEIGHT, WIDTH)
     rng = np.random.default_rng(3)
-    lobe_field = build_fbm(height + 480, width, rng, 3)
-    crack_field = build_fbm(height + 480, width, rng, 5)
-    capture.set(cv2.CAP_PROP_POS_MSEC, START_SEC * 1000)
-    frame_count = int(round(SECONDS * fps))
-    writer, path = open_writer(width, height, fps)
+    lobe_field = build_fbm(HEIGHT + 360, WIDTH, rng, 3)
+    crack_field = build_fbm(HEIGHT + 360, WIDTH, rng, 5)
+    writer, path = open_writer(WIDTH, HEIGHT, FPS)
     preview = None
     placed = False
-    written = 0
     try:
-        for index in range(frame_count):
-            ok, frame = capture.read()
-            if not ok:
-                break
-            lobe = scrolled(lobe_field, index, 1.2, height)
-            cracks = scrolled(crack_field, index, 2.4, height)
-            frame, slope_heat = lay_flow(frame, slope, 78, lobe, cracks)
-            frame, branch_heat = lay_flow(frame, branch, 46, lobe, cracks)
-            if sprite is not None:
-                sx, sy, sw, sh = sprite_box(width, height, sprite)
-                add_contact_shadow(frame, sx, sy, sw, sh)
-            front_heat, front_cover = flow_heat(front[0], 34, lobe, cracks)
-            if sprite is not None:
-                sx, sy, sw, sh = sprite_box(width, height, sprite)
-                near = np.maximum(slope_heat[sy : sy + sh, sx : sx + sw], branch_heat[sy : sy + sh, sx : sx + sw])
-                near = np.maximum(near, front_heat[sy : sy + sh, sx : sx + sw])
-                placed = paste_person(frame, shade_sprite(sprite, near))
-            frame = paint_sheet(frame, front_cover, front_heat)
+        for index in range(FRAMES):
+            frame, placed = compose_frame(index, sprite, slope, branch, front, lobe_field, crack_field)
             writer.write(frame)
-            written += 1
-            if index == frame_count // 2:
-                preview = frame.copy()
+            if index == FRAMES // 2:
+                preview = frame
     finally:
-        capture.release()
         writer.release()
 
-    if written == 0 or preview is None:
-        raise SystemExit("The volcano recording produced no frames.")
+    if preview is None:
+        raise SystemExit("The eruption scene produced no frames.")
     cv2.imwrite(str(preview_path), preview)
     print(f"kornia {kornia.__version__}")
     print("person present" if placed else "person absent")
-    print(f"kanlaon {width}x{height} frames {written} fps {fps:.2f}")
+    print(f"vector {WIDTH}x{HEIGHT} frames {FRAMES} fps {FPS}")
     print(f"ready {path}")
     print(f"ready {preview_path}")
     return 0
