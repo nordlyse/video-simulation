@@ -193,7 +193,7 @@ def add_clouds(frame, index):
         (30, 156, 58, 2.6),
     )
     for step, (cx, cy, spread, phase) in enumerate(clusters):
-        drift = index * (1.5 + (step % 3) * 0.35)
+        drift = index * (0.42 + (step % 3) * 0.08)
         ox = (cx + drift) % (WIDTH + 260) - 130
         for puff in range(12):
             ang = phase + puff * 1.55
@@ -231,20 +231,41 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
-def add_bombs(frame, index):
-    """Hot fragments on short arcs, each with a short tail."""
-    for step in range(7):
-        age = (index * 0.38 + step * 1.37) % 4.6
-        direction = (step - 3) * 6.2 + np.sin(step * 1.7) * 3
-        speed = 15 + (step % 3) * 3
-        x = CRATER[0] + direction * age
-        y = CRATER[1] - speed * age + 2.35 * age * age
-        earlier = max(0.0, age - 0.28)
-        x2 = CRATER[0] + direction * earlier
-        y2 = CRATER[1] - speed * earlier + 2.35 * earlier * earlier
-        if not (0 <= x < WIDTH and 0 <= y < HEIGHT):
+def paint_chunk(frame, x, y, size, color, spin):
+    """An angular lava clot."""
+    if size < 1 or not (-size <= x < WIDTH + size and -size <= y < HEIGHT + size):
+        return
+    pts = []
+    for step, ang in enumerate((0.2, 2.3, 4.2)):
+        radius = size * (1.05 if step == 0 else 0.72)
+        pts.append((int(x + np.cos(ang + spin) * radius), int(y + np.sin(ang + spin) * radius)))
+    cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
+
+
+def add_fountain(frame, index):
+    """Clumps rise together, then break and fall down the flanks."""
+    period = 34.0
+    rise_for = 15.0
+    for group in range(4):
+        age = (index * 0.4 + group * (period / 4)) % period
+        if age < rise_for:
+            height = (age / rise_for) * 108
+            for piece in range(6):
+                spread = (piece - 2.5) * (2.2 + age * 0.05)
+                x = CRATER[0] + spread
+                y = CRATER[1] - height + (piece % 2) * 5
+                paint_chunk(frame, x, y, 9 + piece % 3, (48, 176, 255), piece * 1.3 + group)
             continue
-        cv2.line(frame, (int(x2), int(y2)), (int(x), int(y)), (40, 120, 230), 2, cv2.LINE_AA)
+        fall = age - rise_for
+        for piece in range(6):
+            side = -1.0 if piece < 3 else 1.0
+            slot = piece % 3
+            x = CRATER[0] + side * (12 + slot * 7) + side * (2.8 + slot * 0.8) * fall
+            y = CRATER[1] - 100 + 0.5 * fall * fall + slot * 4
+            if y > CRATER[1] + 130:
+                continue
+            cooled = (26, 110, 220) if slot else (40, 155, 250)
+            paint_chunk(frame, x, y, 8 + slot, cooled, piece + fall * 0.15)
 
 
 def lava_channels(width, height):
@@ -331,7 +352,7 @@ def tangents_of(pos):
 def crust_slabs(pos, progress, tangent, start_w, end_w, index):
     """Irregular crust chunks beside a molten lane that keeps running downhill."""
     slabs = []
-    phase = index * 1.35
+    phase = index * 0.22
     i = 1
     while i < len(pos) - 2:
         span = 2 + int((0.5 + 0.5 * np.sin(i * 0.85 + phase)) * 4)
@@ -388,7 +409,7 @@ def paint_channels(frame, index):
     slabs = []
     for points, start_w, end_w, phase in lava_channels(WIDTH, HEIGHT):
         pos, progress, _tangent = path_samples(points, 48)
-        pos = meander(pos, phase + index * 0.4)
+        pos = meander(pos, phase + index * 0.07)
         tangent = tangents_of(pos)
         bank = jagged_strip(pos, progress, tangent, start_w, end_w, phase, False)
         core = jagged_strip(pos, progress, tangent, start_w, end_w, phase, True)
@@ -518,8 +539,8 @@ def compose_frame(index, sprite, lobe_field, backdrop):
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
     add_plume(frame, index, billow)
     add_crater(frame, index)
-    add_bombs(frame, index)
     melt = paint_channels(frame, index)
+    add_fountain(frame, index)
     placed = False
     if sprite is not None:
         sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
