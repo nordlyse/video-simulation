@@ -99,9 +99,9 @@ def build_backdrop(grain):
     t = (yy - apex_y) / span
     tt = np.clip(t, 0, 1)
     # Blunt summit so the crater sits in the cone instead of floating on a point.
-    half = 48 + 220 * np.power(tt, 1.28)
-    skirt = np.power(np.clip((tt - 0.74) / 0.26, 0, 1), 2)
-    half = half + skirt * 70
+    half = 78 + 360 * np.power(tt, 1.12)
+    skirt = np.power(np.clip((tt - 0.7) / 0.3, 0, 1), 2)
+    half = half + skirt * 120
     jag = 1 + 0.11 * np.sin(yy * 0.09 + 0.4) + 0.07 * np.sin(yy * 0.22 + 1.1) + 0.05 * np.sin(yy * 0.41)
     cx = apex_x - tt * 18 + np.sin(tt * 3.1) * 6
     flank = (xx - cx) / np.maximum(half * jag, 1)
@@ -120,7 +120,7 @@ def build_backdrop(grain):
     rock *= (1 - limb * 0.5)[..., None]
     trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
     rock *= (1 - trough * 0.28)[..., None]
-    for base_x, amount in ((200, 0.72), (310, -0.5), (420, 0.48), (560, 0.7), (670, -0.58), (780, 0.62), (860, -0.5)):
+    for base_x, amount in ((80, 0.72), (220, -0.5), (360, 0.48), (620, 0.7), (760, -0.58), (900, 0.62)):
         x0, y0 = apex_x, apex_y + 16
         x1, y1 = float(base_x), BASE_Y + 8
         vx, vy = x1 - x0, y1 - y0
@@ -136,12 +136,12 @@ def build_backdrop(grain):
         else:
             rock += (shade * (-amount) * 95)[..., None]
     for base_x, color in (
-        (220, (14, 12, 16)),
-        (310, (76, 86, 122)),
-        (390, (12, 10, 14)),
-        (720, (82, 92, 128)),
-        (800, (14, 12, 16)),
-        (870, (78, 88, 120)),
+        (120, (14, 12, 16)),
+        (260, (76, 86, 122)),
+        (400, (12, 10, 14)),
+        (760, (82, 92, 128)),
+        (880, (14, 12, 16)),
+        (980, (78, 88, 120)),
     ):
         mask = np.zeros((HEIGHT, WIDTH), np.uint8)
         poly = np.array(
@@ -182,33 +182,38 @@ def add_crater(frame, index):
 
 
 def add_clouds(frame, index):
-    """Torn charcoal clouds. Each mass is a cluster of puffs, not one oval."""
-    layer = np.zeros((HEIGHT, WIDTH), np.float32)
-    clusters = (
-        (150, 58, 78, 0.4),
-        (470, 34, 96, 1.3),
-        (800, 62, 84, 2.2),
-        (280, 128, 64, 0.8),
-        (660, 138, 72, 1.9),
-        (30, 156, 58, 2.6),
+    """Soft cumulus banks. Bright tops, gray bases, slow drift."""
+    color = np.zeros_like(frame, np.float32)
+    cover = np.zeros((HEIGHT, WIDTH), np.float32)
+    banks = (
+        (120, 70, 0.4),
+        (430, 48, 1.2),
+        (760, 76, 2.1),
+        (250, 150, 0.6),
+        (640, 158, 1.7),
     )
-    for step, (cx, cy, spread, phase) in enumerate(clusters):
-        drift = index * (0.42 + (step % 3) * 0.08)
-        ox = (cx + drift) % (WIDTH + 260) - 130
-        for puff in range(12):
-            ang = phase + puff * 1.55
-            px = int(ox + np.cos(ang) * spread * (0.45 + 0.22 * np.sin(puff * 1.7)))
-            py = int(cy + np.sin(ang * 0.85) * spread * 0.32)
-            radius = int(spread * (0.22 + 0.16 * (0.5 + 0.5 * np.sin(puff * 2.4 + phase))))
-            if radius > 4:
-                cv2.circle(layer, (px, py), radius, 0.9, -1)
-    soft = cv2.GaussianBlur(layer, (31, 31), 8)
+    for step, (cx, cy, phase) in enumerate(banks):
+        drift = index * (0.28 + (step % 3) * 0.05)
+        ox = (cx + drift) % (WIDTH + 240) - 80
+        for puff in range(5):
+            px = int(ox + (puff - 2) * 34 + np.sin(phase + puff) * 5)
+            py = int(cy + 10)
+            radius = 30 + (puff % 3) * 7
+            cv2.circle(color, (px, py), radius, (78, 82, 90), -1)
+            cv2.circle(cover, (px, py), radius, 0.72, -1)
+        for puff in range(3):
+            px = int(ox + (puff - 1) * 30)
+            py = int(cy - 24)
+            radius = 22 + puff * 4
+            cv2.circle(color, (px, py), radius, (148, 154, 164), -1)
+            cv2.circle(cover, (px, py), radius, 0.66, -1)
+    color = cv2.GaussianBlur(color, (51, 51), 16)
+    cover = cv2.GaussianBlur(cover, (51, 51), 16)
     sky = frame[:, :, 0].astype(np.float32) > frame[:, :, 2].astype(np.float32) + 6
-    alpha = np.clip(soft * 1.15, 0, 0.88)
-    alpha = (alpha * sky)[..., None]
-    dark = np.array([18, 19, 22], np.float32)
+    alpha = np.clip(cover, 0, 0.78) * sky
+    alpha = alpha[..., None]
     base = frame.astype(np.float32)
-    frame[:] = np.clip(base * (1 - alpha) + dark * alpha, 0, 255).astype(np.uint8)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
 def add_plume(frame, index, billow):
@@ -243,29 +248,30 @@ def paint_chunk(frame, x, y, size, color, spin):
 
 
 def add_fountain(frame, index):
-    """Clumps rise together, then break and fall down the flanks."""
-    period = 34.0
-    rise_for = 15.0
-    for group in range(4):
-        age = (index * 0.4 + group * (period / 4)) % period
+    """One column rises together. Pieces then drift slowly off the sides."""
+    period = 52.0
+    rise_for = 18.0
+    for group in range(2):
+        age = (index * 0.22 + group * (period / 2)) % period
         if age < rise_for:
-            height = (age / rise_for) * 108
-            for piece in range(6):
-                spread = (piece - 2.5) * (2.2 + age * 0.05)
-                x = CRATER[0] + spread
-                y = CRATER[1] - height + (piece % 2) * 5
-                paint_chunk(frame, x, y, 9 + piece % 3, (48, 176, 255), piece * 1.3 + group)
+            height = (age / rise_for) ** 0.8 * 128
+            for piece in range(9):
+                col = (piece % 3) - 1
+                row = piece // 3
+                x = CRATER[0] + col * 8
+                y = CRATER[1] - height - row * 11
+                paint_chunk(frame, x, y, 11 + (piece % 2) * 3, (52, 186, 255), piece * 0.7 + group)
             continue
         fall = age - rise_for
-        for piece in range(6):
-            side = -1.0 if piece < 3 else 1.0
-            slot = piece % 3
-            x = CRATER[0] + side * (12 + slot * 7) + side * (2.8 + slot * 0.8) * fall
-            y = CRATER[1] - 100 + 0.5 * fall * fall + slot * 4
-            if y > CRATER[1] + 130:
+        for piece in range(8):
+            side = -1.0 if piece < 4 else 1.0
+            slot = piece % 4
+            x = CRATER[0] + side * (8 + slot * 6) + side * 0.85 * fall
+            y = CRATER[1] - 120 + 0.18 * fall * fall + slot * 7
+            if y > CRATER[1] + 160:
                 continue
-            cooled = (26, 110, 220) if slot else (40, 155, 250)
-            paint_chunk(frame, x, y, 8 + slot, cooled, piece + fall * 0.15)
+            cooled = (30, 118, 225) if slot else (44, 160, 250)
+            paint_chunk(frame, x, y, 9 + slot, cooled, piece * 0.8)
 
 
 def lava_channels(width, height):
@@ -352,7 +358,7 @@ def tangents_of(pos):
 def crust_slabs(pos, progress, tangent, start_w, end_w, index):
     """Irregular crust chunks beside a molten lane that keeps running downhill."""
     slabs = []
-    phase = index * 0.22
+    phase = index * 0.08
     i = 1
     while i < len(pos) - 2:
         span = 2 + int((0.5 + 0.5 * np.sin(i * 0.85 + phase)) * 4)
@@ -409,7 +415,7 @@ def paint_channels(frame, index):
     slabs = []
     for points, start_w, end_w, phase in lava_channels(WIDTH, HEIGHT):
         pos, progress, _tangent = path_samples(points, 48)
-        pos = meander(pos, phase + index * 0.07)
+        pos = meander(pos, phase + index * 0.025)
         tangent = tangents_of(pos)
         bank = jagged_strip(pos, progress, tangent, start_w, end_w, phase, False)
         core = jagged_strip(pos, progress, tangent, start_w, end_w, phase, True)
