@@ -1,7 +1,7 @@
 """Place the extracted person in a vector eruption.
 
-Ash rises from the crater. Lava leaves the vent, runs down the cone,
-and spreads on the ground.
+A shaded cone, a billowing ash column, and a widening lava sheet.
+Lava leaves the vent, runs down the face, and spreads on the plain.
 """
 
 from pathlib import Path
@@ -20,7 +20,9 @@ WIDTH = 960
 HEIGHT = 540
 FPS = 12
 FRAMES = FPS * 6
-CRATER = (480, 198)
+APEX = (500.0, 148.0)
+BASE_Y = 468.0
+CRATER = (498, 184)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
 
@@ -91,34 +93,176 @@ def scrolled(field, index, speed, height):
     return rolled[:height]
 
 
-def flow_heat(dist, radius, lobe, cracks):
-    """Dark crust with a few molten channels running downhill."""
-    limit = radius * (0.72 + 0.5 * lobe)
-    cover = np.clip((limit - dist) / (radius * 0.28), 0, 1)
-    cover[dist >= limit] = 0
-    height, width = cracks.shape
-    slim = cv2.resize(cracks, (max(8, width // 7), height), interpolation=cv2.INTER_AREA)
-    rivers = cv2.resize(slim, (width, height), interpolation=cv2.INTER_LINEAR)
-    heat = np.clip((rivers - 0.57) * 5.0, 0, 1)
-    heat[cover < 0.45] = 0
-    return heat.astype(np.float32), cover.astype(np.float32)
+def smoothstep(value):
+    shaped = np.clip(value, 0, 1)
+    return shaped * shaped * (3 - 2 * shaped)
 
 
-def paint_sheet(frame, cover, heat):
-    """Darken the ground into crust and light only the cracks."""
+def build_backdrop(grain):
+    """Sky, hazy ridges, and a round cone with gullies and a scree apron."""
+    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float32)
+    lift = yy / (HEIGHT - 1)
+    horizon = np.clip((lift - 0.42) / 0.58, 0, 1)
+    top = np.array([72, 40, 22], np.float32)
+    mid = np.array([108, 72, 46], np.float32)
+    haze = np.array([120, 132, 158], np.float32)
+    sky = top * (1 - lift[..., None]) + mid * lift[..., None]
+    sky = sky * (1 - horizon[..., None] * 0.72) + haze * (horizon[..., None] * 0.72)
+    frame = sky.copy()
+
+    def lay_ridge(base, amp, color, cover):
+        peaks = (
+            base
+            + amp * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.012 + base * 0.01)
+            + amp * 0.4 * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.029 + 1.4)
+        )
+        mask = yy > peaks[None, :]
+        tone = color * (0.9 + 0.16 * grain)[..., None]
+        frame[mask] = frame[mask] * (1 - cover) + tone[mask] * cover
+
+    lay_ridge(292, 34, np.array([96, 90, 84], np.float32), 0.55)
+    lay_ridge(338, 22, np.array([62, 60, 58], np.float32), 0.82)
+
+    apex_x, apex_y = APEX
+    span = BASE_Y - apex_y
+    t = (yy - apex_y) / span
+    tt = np.clip(t, 0, 1)
+    # Blunt summit so the crater sits in the cone instead of floating on a point.
+    half = 48 + 220 * np.power(tt, 1.28)
+    skirt = np.power(np.clip((tt - 0.74) / 0.26, 0, 1), 2)
+    half = half + skirt * 70
+    jag = 1 + 0.04 * np.sin(yy * 0.085 + 0.6) + 0.025 * np.sin(yy * 0.21)
+    cx = apex_x - tt * 18 + np.sin(tt * 3.1) * 6
+    flank = (xx - cx) / np.maximum(half * jag, 1)
+    cone = (t >= 0) & (t <= 1.04) & (np.abs(flank) <= 1) & (yy < HEIGHT - 8)
+
+    facing = np.sqrt(np.clip(1 - np.clip(flank, -1, 1) ** 2, 0, 1))
+    light = np.clip(flank * 0.42 + facing * 0.9, 0, 1)
+    narrow = cv2.resize(grain, (WIDTH // 7, HEIGHT), interpolation=cv2.INTER_AREA)
+    gullies = cv2.resize(narrow, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
+    gullies = cv2.GaussianBlur(gullies, (9, 9), 0)
+    shadow = np.array([26, 24, 30], np.float32)
+    lit = np.array([64, 74, 104], np.float32)
+    rock = shadow * (1 - light[..., None]) + lit * light[..., None]
+    rock *= (0.78 + 0.36 * gullies)[..., None]
+    limb = np.clip((np.abs(flank) - 0.78) / 0.22, 0, 1)
+    rock *= (1 - limb * 0.5)[..., None]
+    trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
+    rock *= (1 - trough * 0.28)[..., None]
+    frame[cone] = np.clip(rock, 0, 255)[cone]
+
+    ground = (yy >= 492) & ~cone
+    plain = np.array([32, 30, 34], np.float32)
+    shade = 1.0 - 0.18 * np.clip((yy - 492) / 48, 0, 1)
+    ground_tone = plain * (0.9 + 0.18 * grain)[..., None] * shade[..., None]
+    frame[ground] = np.clip(ground_tone, 0, 255)[ground]
+    return np.clip(frame, 0, 255).astype(np.uint8)
+
+
+def add_crater(frame, index):
+    """A lava lake in the summit. The near lip is bright and the far lip is dark."""
+    pulse = 0.85 + 0.15 * np.sin(index * 0.65)
+    rim = (CRATER[0], CRATER[1] - 2)
+    cv2.ellipse(frame, rim, (40, 14), 0, 0, 360, (48, 52, 58), -1)
+    cv2.ellipse(frame, CRATER, (30, 10), 0, 0, 360, (8, 6, 10), -1)
+    lake = (CRATER[0], CRATER[1] + 3)
+    orange = (int(20 * pulse), int(80 * pulse), int(220 * pulse))
+    cv2.ellipse(frame, lake, (24, 8), 0, 0, 360, orange, -1)
+    cv2.ellipse(frame, (CRATER[0], CRATER[1] - 1), (24, 7), 0, 0, 360, (8, 6, 10), -1)
+    glow = np.zeros_like(frame, np.float32)
+    cv2.ellipse(glow, lake, (28, 10), 0, 0, 360, (16, 70, 200), -1)
+    glow = cv2.GaussianBlur(glow, (21, 21), 5)
+    frame[:] = np.clip(frame.astype(np.float32) + glow * 0.35, 0, 255).astype(np.uint8)
+
+
+def add_plume(frame, index, billow):
+    """One ash column. Noise bulges the sides so it is not a stack of rings."""
+    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float32)
+    cx, cy = float(CRATER[0]), float(CRATER[1])
+    height_frac = np.clip((cy - yy) / 320.0, 0, 1)
+    lean = height_frac ** 2 * 96 + np.sin(height_frac * 6.0 + index * 0.22) * (8 + height_frac * 24)
+    column_x = cx + lean
+    width = 22 + height_frac * 78 + (billow - 0.5) * 36
+    dx = (xx - column_x) / np.maximum(width, 8)
+    column = np.exp(-0.5 * dx * dx) * np.clip(1.05 - height_frac, 0, 1)
+    column *= 0.7 + 0.85 * billow
+    column[yy > cy + 8] = 0
+    soft = cv2.GaussianBlur(column.astype(np.float32), (21, 21), 5)
+    gray = 22 + soft * 110
+    ash = np.dstack((gray * 0.75, gray * 0.78, gray * 0.8))
+    alpha = np.clip(soft * 1.35, 0, 0.84)[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
+
+
+def add_bombs(frame, index):
+    """Hot fragments on short arcs, each with a short tail."""
+    for step in range(7):
+        age = (index * 0.38 + step * 1.37) % 4.6
+        direction = (step - 3) * 6.2 + np.sin(step * 1.7) * 3
+        speed = 15 + (step % 3) * 3
+        x = CRATER[0] + direction * age
+        y = CRATER[1] - speed * age + 2.35 * age * age
+        earlier = max(0.0, age - 0.28)
+        x2 = CRATER[0] + direction * earlier
+        y2 = CRATER[1] - speed * earlier + 2.35 * earlier * earlier
+        if not (0 <= x < WIDTH and 0 <= y < HEIGHT):
+            continue
+        cv2.line(frame, (int(x2), int(y2)), (int(x), int(y)), (28, 80, 190), 2, cv2.LINE_AA)
+        blend_disc(frame, x, y, 3 + step % 2, (150, 220, 255), 0.95)
+
+
+def lava_paths(width, height):
+    """A front sheet, a left tongue, and a short run down the right face."""
+    front = scale_points(
+        width,
+        height,
+        ((0.52, 0.36), (0.48, 0.52), (0.42, 0.68), (0.34, 0.84), (0.28, 0.97)),
+    )
+    tongue = scale_points(
+        width,
+        height,
+        ((0.49, 0.48), (0.38, 0.64), (0.28, 0.80), (0.20, 0.96)),
+    )
+    right = scale_points(
+        width,
+        height,
+        ((0.54, 0.38), (0.60, 0.50), (0.66, 0.60)),
+    )
+    return front, tongue, right
+
+
+def sheet_masks(dist, along, travel, lobe, crust, scale):
+    """An orange sheet. Dark plates float on it and the toe only brightens a little."""
+    progress = np.clip(along / max(travel, 1.0), 0, 1)
+    radius = (22 + np.power(progress, 1.05) * 96 * scale) * (0.78 + 0.36 * lobe)
+    cover = smoothstep((radius - dist) / 18.0)
+    center = np.clip(1 - dist / (radius * 0.85 + 1e-3), 0, 1)
+    molten = cover * (0.42 + 0.5 * center)
+    plates = np.clip((crust - 0.5) * 2.6, 0, 1) * cover
+    melt = molten * (1 - plates * 0.8)
+    rim = smoothstep((progress - 0.84) / 0.16) * np.clip(1 - dist / (radius * 0.55 + 1e-3), 0, 1)
+    melt = np.clip(melt + rim * 0.22, 0, 0.88)
+    return melt.astype(np.float32), cover.astype(np.float32)
+
+
+def paint_lava(frame, cover, melt):
+    """Deep red under orange. The glow warms the rock and stays off the white core."""
     picture = frame.astype(np.float32)
-    crust = picture * np.array([0.28, 0.22, 0.42], np.float32)
-    glow_color = np.array([40, 120, 255], np.float32)
-    core_color = np.array([170, 235, 255], np.float32)
-    melt = glow_color * (1 - heat[..., None]) + core_color * heat[..., None]
-    lava = crust * (1 - heat[..., None]) + melt * heat[..., None]
-    cover_c = np.clip(cover, 0, 1)[..., None]
-    mixed = picture * (1 - cover_c) + lava * cover_c
-    hot = (melt / 255) * heat[..., None]
-    hot_t = torch.from_numpy(np.ascontiguousarray(hot)).permute(2, 0, 1).unsqueeze(0)
-    glow = kornia.filters.gaussian_blur2d(hot_t, (21, 21), (6.0, 6.0))
-    base = torch.from_numpy(np.ascontiguousarray(mixed / 255)).permute(2, 0, 1).unsqueeze(0)
-    lit = 1 - (1 - base) * (1 - glow.clamp(0, 1) * 0.65)
+    crust = np.array([8, 12, 48], np.float32)
+    orange = np.array([18, 72, 220], np.float32)
+    yellow = np.array([40, 150, 255], np.float32)
+    hot = melt[..., None]
+    color = crust * (1 - hot) + orange * hot
+    core = np.clip((melt - 0.62) / 0.38, 0, 1)[..., None]
+    color = color * (1 - core) + yellow * core
+    alpha = cover[..., None]
+    mixed = picture * (1 - alpha) + color * alpha
+    glow_bgr = (orange / 255.0) * np.clip(melt, 0, 1)[..., None]
+    glow_t = torch.from_numpy(np.ascontiguousarray(glow_bgr)).permute(2, 0, 1).unsqueeze(0)
+    glow = kornia.filters.gaussian_blur2d(glow_t, (21, 21), (6.0, 6.0))
+    base = torch.from_numpy(np.ascontiguousarray(mixed / 255.0)).permute(2, 0, 1).unsqueeze(0)
+    lit = 1 - (1 - base) * (1 - glow.clamp(0, 1) * 0.38)
     return (lit.squeeze(0).permute(1, 2, 0).clamp(0, 1) * 255).to(torch.uint8).cpu().numpy()
 
 
@@ -140,26 +284,20 @@ def add_contact_shadow(frame, x, y, width, height):
 
 
 def shade_sprite(sprite, heat):
-    """Warm the cutout from the lava and darken the side facing away from it."""
+    """Warm the side toward the lava. The far side stays cooler."""
     height, width = sprite.shape[:2]
     rgb = sprite[:, :, :3].astype(np.float32)
-    across = np.linspace(1.0, 0.0, width, dtype=np.float32)
-    down = np.linspace(0.35, 1.0, height, dtype=np.float32)
-    light = np.clip(across[None, :] * 0.72 + down[:, None] * 0.48, 0, 1)
+    across = np.linspace(1.0, 0.2, width, dtype=np.float32)
+    down = np.linspace(0.45, 1.0, height, dtype=np.float32)
+    light = np.clip(across[None, :] * 0.7 + down[:, None] * 0.3, 0, 1)
     if heat is not None and heat.shape[:2] == (height, width):
-        light = np.clip(light * 0.62 + heat * 1.15, 0, 1)
-    cool = np.array([0.78, 0.72, 0.62], np.float32)
-    warm = np.array([0.88, 0.98, 1.16], np.float32)
+        light = np.clip(light * 0.82 + heat * 0.55, 0, 1)
+    cool = np.array([0.74, 0.72, 0.68], np.float32)
+    warm = np.array([0.84, 0.92, 1.06], np.float32)
     gain = cool + (warm - cool) * light[..., None]
-    shaded = np.clip(rgb * gain + light[..., None] * np.array([2, 10, 22], np.float32), 0, 255)
+    shaded = np.clip(rgb * gain, 0, 255)
     if heat is not None and heat.shape[:2] == (height, width):
-        shaded = np.clip(shaded + heat[..., None] * np.array([8, 36, 78], np.float32), 0, 255)
-
-    mask = np.where(sprite[:, :, 3] > 20, np.uint8(255), np.uint8(0))
-    inner = cv2.erode(mask, np.ones((3, 3), np.uint8))
-    rim = ((mask > 0) & (inner == 0)).astype(np.float32) * np.clip(across[None, :] - 0.35, 0, 1)
-    shaded = np.clip(shaded + rim[..., None] * np.array([12, 48, 110], np.float32), 0, 255)
-
+        shaded = np.clip(shaded + heat[..., None] * np.array([4, 16, 36], np.float32), 0, 255)
     out = sprite.copy()
     out[:, :, :3] = shaded.astype(np.uint8)
     return out
@@ -181,92 +319,6 @@ def blend_disc(frame, x, y, radius, color, alpha):
     mixed = roi.copy()
     mixed[mask] = (alpha * np.array(color, np.float32) + (1 - alpha) * roi[mask]).astype(np.uint8)
     frame[y0:y1, x0:x1] = mixed
-
-
-def draw_vector_scene():
-    """Sky, ridges, and a cone built from flat shapes."""
-    frame = np.zeros((HEIGHT, WIDTH, 3), np.uint8)
-    lift = np.linspace(0, 1, HEIGHT, dtype=np.float32)[:, None]
-    frame[:, :, 0] = (92 * (1 - lift) + 168 * lift).astype(np.uint8)
-    frame[:, :, 1] = (62 * (1 - lift) + 118 * lift).astype(np.uint8)
-    frame[:, :, 2] = (48 * (1 - lift) + 92 * lift).astype(np.uint8)
-    ridge = np.array(
-        [[0, 330], [180, 280], [360, 310], [560, 250], [780, 300], [WIDTH, 270], [WIDTH, 430], [0, 430]],
-        np.int32,
-    )
-    cv2.fillPoly(frame, [ridge], (58, 62, 74))
-    cone = np.array(
-        [[70, 438], [330, 248], [448, 188], [518, 188], [680, 260], [910, 438]],
-        np.int32,
-    )
-    cv2.fillPoly(frame, [cone], (42, 46, 58))
-    lit_face = np.array([[480, 190], [518, 188], [760, 438], [470, 438]], np.int32)
-    cv2.fillPoly(frame, [lit_face], (36, 48, 72))
-    cv2.rectangle(frame, (0, 430), (WIDTH, HEIGHT), (28, 46, 34), -1)
-    cv2.ellipse(frame, CRATER, (46, 16), 0, 0, 360, (18, 42, 90), -1)
-    cv2.ellipse(frame, CRATER, (28, 9), 0, 0, 360, (30, 90, 255), -1)
-    return frame
-
-
-def add_plume(frame, index):
-    """Rising ash. Overlapping puffs are blurred into one column."""
-    layer = np.zeros_like(frame)
-    cx, cy = CRATER
-    life = 8.0
-    for step in range(26):
-        age = (index * 0.42 + step * (life / 26)) % life
-        rise = age / life
-        y = int(cy - 6 - rise * (HEIGHT * 0.48))
-        spread = 6 + rise * 54
-        x = int(cx + np.sin(step * 2.05 + index * 0.18) * spread * 0.28)
-        radius = int(22 + rise * 48)
-        tone = int(28 + rise * 100)
-        color = (max(0, tone - 14), max(0, tone - 6), min(255, tone + 4))
-        if radius > 1:
-            cv2.circle(layer, (x, y), radius, color, -1)
-    soft = cv2.GaussianBlur(layer, (41, 41), 12)
-    alpha = np.clip(soft.max(axis=2).astype(np.float32) / 140, 0, 0.78)[..., None]
-    frame[:] = (frame.astype(np.float32) * (1 - alpha) + soft.astype(np.float32) * alpha).astype(np.uint8)
-
-
-def add_bombs(frame, index):
-    """Hot fragments thrown from the vent on short arcs."""
-    for step in range(9):
-        age = (index * 0.35 + step * 1.15) % 5.2
-        direction = (step - 4) * 4.4
-        x = CRATER[0] + direction * age
-        y = CRATER[1] - 16 * age + 2.1 * age * age
-        if not (0 <= x < WIDTH and 0 <= y < HEIGHT):
-            continue
-        blend_disc(frame, x, y, 4, (35, 130, 255), 0.9)
-
-
-def lava_paths(width, height, sprite):
-    slope = scale_points(
-        width,
-        height,
-        ((0.50, 0.38), (0.47, 0.52), (0.42, 0.68), (0.34, 0.86)),
-    )
-    branch = scale_points(
-        width,
-        height,
-        ((0.50, 0.62), (0.55, 0.78), (0.62, 0.90)),
-    )
-    if sprite is None:
-        front = scale_points(width, height, ((0.62, 0.86), (0.76, 0.92), (0.90, 0.98)))
-    else:
-        x, y, sprite_width, sprite_height = sprite_box(width, height, sprite)
-        front = (
-            (x + sprite_width * 0.05, y + sprite_height * 0.82),
-            (x + sprite_width * 0.45, y + sprite_height * 0.91),
-            (x + sprite_width * 0.88, y + sprite_height * 0.98),
-        )
-    return slope, branch, front
-
-
-def lay_flow(frame, field, radius, lobe, cracks):
-    heat, cover = flow_heat(field[0], radius, lobe, cracks)
-    return paint_sheet(frame, cover, heat), heat
 
 
 def sprite_box(frame_width, frame_height, sprite):
@@ -308,36 +360,55 @@ def open_writer(width, height, fps):
     raise SystemExit("The video writer did not open.")
 
 
-def compose_frame(index, sprite, slope, branch, front, lobe_field, crack_field):
-    frame = draw_vector_scene()
-    add_plume(frame, index)
+def downhill_noise(field, index, speed, cells):
+    """Scroll a field downward and stretch it into long channels."""
+    rolled = scrolled(field, index, speed, HEIGHT)
+    slim = cv2.resize(rolled, (max(8, WIDTH // cells), max(8, HEIGHT // cells)), interpolation=cv2.INTER_AREA)
+    return cv2.resize(slim, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
+
+
+def compose_frame(index, sprite, front, tongue, right, lobe_field, crack_field, backdrop):
+    frame = backdrop.copy()
+    billow = scrolled(lobe_field, index, 1.4, HEIGHT)
+    add_plume(frame, index, billow)
+    add_crater(frame, index)
     add_bombs(frame, index)
-    lobe = scrolled(lobe_field, index, 1.1, HEIGHT)
-    cracks = scrolled(crack_field, index, 2.2, HEIGHT)
-    frame, slope_heat = lay_flow(frame, slope, 36, lobe, cracks)
-    frame, branch_heat = lay_flow(frame, branch, 48, lobe, cracks)
-    if sprite is not None:
-        sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
-        add_contact_shadow(frame, sx, sy, sw, sh)
-    front_heat, front_cover = flow_heat(front[0], 22, lobe, cracks)
+    lobe = downhill_noise(lobe_field, index, 1.0, 10)
+    crust = downhill_noise(crack_field, index, 2.6, 5)
+    sheets = (
+        sheet_masks(front[0], front[1], front[2], lobe, crust, 1.2),
+        sheet_masks(tongue[0], tongue[1], tongue[2], lobe, crust, 0.85),
+        sheet_masks(right[0], right[1], right[2], lobe, crust, 0.45),
+    )
+    melt = sheets[0][0]
+    cover = sheets[0][1]
+    for part_melt, part_cover in sheets[1:]:
+        melt = np.maximum(melt, part_melt)
+        cover = np.maximum(cover, part_cover)
+    frame = paint_lava(frame, cover, melt)
     placed = False
     if sprite is not None:
         sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
-        near = np.maximum(slope_heat[sy : sy + sh, sx : sx + sw], branch_heat[sy : sy + sh, sx : sx + sw])
-        near = np.maximum(near, front_heat[sy : sy + sh, sx : sx + sw])
+        add_contact_shadow(frame, sx, sy, sw, sh)
+        near = melt[sy : sy + sh, sx : sx + sw]
+        if near.shape[:2] != (sh, sw):
+            padded = np.zeros((sh, sw), np.float32)
+            padded[: near.shape[0], : near.shape[1]] = near
+            near = padded
         placed = paste_person(frame, shade_sprite(sprite, near))
-    frame = paint_sheet(frame, front_cover, front_heat)
     return frame, placed
 
 
 def main():
     ready.mkdir(parents=True, exist_ok=True)
     sprite = person_sprite(WIDTH, HEIGHT)
-    slope_pts, branch_pts, front_pts = lava_paths(WIDTH, HEIGHT, sprite)
-    slope = flow_field(slope_pts, HEIGHT, WIDTH)
-    branch = flow_field(branch_pts, HEIGHT, WIDTH)
+    front_pts, tongue_pts, right_pts = lava_paths(WIDTH, HEIGHT)
     front = flow_field(front_pts, HEIGHT, WIDTH)
+    tongue = flow_field(tongue_pts, HEIGHT, WIDTH)
+    right = flow_field(right_pts, HEIGHT, WIDTH)
     rng = np.random.default_rng(3)
+    grain = build_fbm(HEIGHT, WIDTH, rng, 4)
+    backdrop = build_backdrop(grain)
     lobe_field = build_fbm(HEIGHT + 360, WIDTH, rng, 3)
     crack_field = build_fbm(HEIGHT + 360, WIDTH, rng, 5)
     writer, path = open_writer(WIDTH, HEIGHT, FPS)
@@ -345,7 +416,9 @@ def main():
     placed = False
     try:
         for index in range(FRAMES):
-            frame, placed = compose_frame(index, sprite, slope, branch, front, lobe_field, crack_field)
+            frame, placed = compose_frame(
+                index, sprite, front, tongue, right, lobe_field, crack_field, backdrop
+            )
             writer.write(frame)
             if index == FRAMES // 2:
                 preview = frame
