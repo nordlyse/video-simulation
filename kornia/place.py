@@ -102,7 +102,7 @@ def build_backdrop(grain):
     half = 78 + 360 * np.power(tt, 1.12)
     skirt = np.power(np.clip((tt - 0.7) / 0.3, 0, 1), 2)
     half = half + skirt * 120
-    jag = 1 + 0.11 * np.sin(yy * 0.09 + 0.4) + 0.07 * np.sin(yy * 0.22 + 1.1) + 0.05 * np.sin(yy * 0.41)
+    jag = 1 + 0.02 * np.sin(yy * 0.05 + 0.4) + 0.012 * np.sin(yy * 0.13)
     cx = apex_x - tt * 18 + np.sin(tt * 3.1) * 6
     flank = (xx - cx) / np.maximum(half * jag, 1)
     cone = (t >= 0) & (t <= 1.04) & (np.abs(flank) <= 1) & (yy < HEIGHT - 8)
@@ -154,7 +154,8 @@ def build_backdrop(grain):
             np.int32,
         )
         cv2.fillPoly(mask, [poly], 1)
-        rock[mask > 0] = np.array(color, np.float32)
+        on_face = (mask > 0) & cone & (np.abs(flank) < 0.78)
+        rock[on_face] = np.array(color, np.float32)
     frame[cone] = np.clip(rock, 0, 255)[cone]
 
     ground = (yy >= 492) & ~cone
@@ -195,16 +196,16 @@ def add_clouds(frame, index):
     for step, (cx, cy, phase) in enumerate(banks):
         drift = index * (0.28 + (step % 3) * 0.05)
         ox = (cx + drift) % (WIDTH + 240) - 80
-        for puff in range(5):
-            px = int(ox + (puff - 2) * 34 + np.sin(phase + puff) * 5)
-            py = int(cy + 10)
-            radius = 30 + (puff % 3) * 7
+        for puff in range(7):
+            px = int(ox + (puff - 3) * 46 + np.sin(phase + puff) * 6)
+            py = int(cy + 12)
+            radius = 42 + (puff % 3) * 10
             cv2.circle(color, (px, py), radius, (78, 82, 90), -1)
             cv2.circle(cover, (px, py), radius, 0.72, -1)
-        for puff in range(3):
-            px = int(ox + (puff - 1) * 30)
-            py = int(cy - 24)
-            radius = 22 + puff * 4
+        for puff in range(5):
+            px = int(ox + (puff - 2) * 40)
+            py = int(cy - 28)
+            radius = 30 + puff * 4
             cv2.circle(color, (px, py), radius, (148, 154, 164), -1)
             cv2.circle(cover, (px, py), radius, 0.66, -1)
     color = cv2.GaussianBlur(color, (51, 51), 16)
@@ -248,30 +249,38 @@ def paint_chunk(frame, x, y, size, color, spin):
 
 
 def add_fountain(frame, index):
-    """One column rises together. Pieces then drift slowly off the sides."""
-    period = 52.0
-    rise_for = 18.0
-    for group in range(2):
-        age = (index * 0.22 + group * (period / 2)) % period
-        if age < rise_for:
-            height = (age / rise_for) ** 0.8 * 128
-            for piece in range(9):
-                col = (piece % 3) - 1
-                row = piece // 3
-                x = CRATER[0] + col * 8
-                y = CRATER[1] - height - row * 11
-                paint_chunk(frame, x, y, 11 + (piece % 2) * 3, (52, 186, 255), piece * 0.7 + group)
+    """A lava mushroom that keeps rising. Pieces spill off the cap."""
+    cx, cy = float(CRATER[0]), float(CRATER[1])
+    cap_y = cy - 132
+    stem = np.array(
+        [[cx - 18, cy - 4], [cx + 18, cy - 4], [cx + 26, cap_y + 16], [cx - 26, cap_y + 16]],
+        np.int32,
+    )
+    cv2.fillPoly(frame, [stem], (28, 110, 240))
+    cv2.ellipse(frame, (int(cx), int(cap_y)), (86, 30), 0, 0, 360, (46, 160, 255), -1)
+    cv2.ellipse(frame, (int(cx), int(cap_y - 4)), (48, 16), 0, 0, 360, (90, 210, 255), -1)
+    for step in range(16):
+        travel = (step * 9 + index * 2.4) % 128
+        y = cy - 6 - travel
+        if y < cap_y + 8:
             continue
-        fall = age - rise_for
-        for piece in range(8):
-            side = -1.0 if piece < 4 else 1.0
-            slot = piece % 4
-            x = CRATER[0] + side * (8 + slot * 6) + side * 0.85 * fall
-            y = CRATER[1] - 120 + 0.18 * fall * fall + slot * 7
-            if y > CRATER[1] + 160:
+        x = cx + np.sin(step * 1.4 + index * 0.2) * 8
+        paint_chunk(frame, x, y, 7, (70, 190, 255), step)
+    for step in range(18):
+        side = -1.0 if step < 9 else 1.0
+        slot = step % 9
+        spread = 12 + (slot * 8 + index * 1.6) % 74
+        x = cx + side * spread
+        y = cap_y - 6 + (spread / 86) * 10
+        paint_chunk(frame, x, y, 8, (64, 184, 255), step * 0.5)
+    for side in (-1.0, 1.0):
+        for slot in range(7):
+            fall = (slot * 16 + index * 1.15) % 120
+            x = cx + side * (78 + fall * 0.22)
+            y = cap_y + 8 + 0.011 * fall * fall + slot * 3
+            if y > cy + 150:
                 continue
-            cooled = (30, 118, 225) if slot else (44, 160, 250)
-            paint_chunk(frame, x, y, 9 + slot, cooled, piece * 0.8)
+            paint_chunk(frame, x, y, 8, (32, 120, 230), slot + side)
 
 
 def lava_channels(width, height):
