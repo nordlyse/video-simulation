@@ -266,33 +266,33 @@ def lava_channels(width, height):
     """Channels leave the crater lip and only step downhill."""
     return (
         (
-            scale_points(width, height, ((0.52, 0.31), (0.49, 0.46), (0.45, 0.62), (0.39, 0.80), (0.33, 0.98))),
-            16,
-            24,
+            scale_points(width, height, ((0.52, 0.31), (0.49, 0.46), (0.44, 0.62), (0.36, 0.80), (0.28, 0.98))),
+            14,
+            38,
             0.4,
         ),
         (
-            scale_points(width, height, ((0.53, 0.32), (0.50, 0.50), (0.46, 0.68), (0.41, 0.84), (0.37, 0.99))),
+            scale_points(width, height, ((0.53, 0.32), (0.51, 0.50), (0.48, 0.68), (0.44, 0.84), (0.40, 0.99))),
             12,
-            18,
+            32,
             1.2,
         ),
         (
-            scale_points(width, height, ((0.50, 0.36), (0.42, 0.54), (0.32, 0.74), (0.24, 0.98))),
-            11,
-            16,
+            scale_points(width, height, ((0.50, 0.36), (0.40, 0.54), (0.30, 0.74), (0.18, 0.98))),
+            10,
+            28,
             2.0,
         ),
         (
-            scale_points(width, height, ((0.47, 0.58), (0.38, 0.76), (0.31, 0.98))),
-            9,
-            13,
+            scale_points(width, height, ((0.47, 0.58), (0.36, 0.76), (0.26, 0.98))),
+            8,
+            22,
             2.7,
         ),
         (
-            scale_points(width, height, ((0.54, 0.32), (0.57, 0.42), (0.60, 0.50), (0.63, 0.58))),
+            scale_points(width, height, ((0.54, 0.32), (0.58, 0.44), (0.63, 0.54), (0.68, 0.62))),
             10,
-            14,
+            26,
             0.6,
         ),
     )
@@ -377,8 +377,6 @@ def jagged_strip(pos, progress, tangent, start_w, end_w, phase, inner):
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
         width = start_w + (end_w - start_w) * float(progress[i])
-        if progress[i] > 0.88:
-            width *= 1 - (float(progress[i]) - 0.88) / 0.12 * 0.75
         if inner:
             width *= 0.46
         jag = np.sin(i * 2.4 + phase) * 0.1 + np.sin(i * 5.2 + phase * 1.3) * 0.05
