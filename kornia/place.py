@@ -212,45 +212,43 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
-def paint_chunk(frame, x, y, size, color, spin):
-    """An angular lava clot."""
-    if size < 1 or not (-size <= x < WIDTH + size and -size <= y < HEIGHT + size):
-        return
-    pts = []
-    for step, ang in enumerate((0.2, 2.3, 4.2)):
-        radius = size * (1.05 if step == 0 else 0.72)
-        pts.append((int(x + np.cos(ang + spin) * radius), int(y + np.sin(ang + spin) * radius)))
-    cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
-
-
-def paint_floret(frame, x, y, radius, color, salt):
-    """A soft lumpy floret. Mild knobs keep it from being a disc or a star."""
+def stamp_lobe(mask, x, y, radius, salt, amount):
+    """A stretched lobe. Neighbors melt together after the shared blur."""
     if radius < 1:
         return
-    pts = []
-    for step in range(12):
-        ang = step / 12 * np.pi * 2 + salt * 0.15
-        knob = 0.9 + 0.14 * np.sin(step * 2.2 + salt)
-        pts.append((int(x + np.cos(ang) * radius * knob), int(y + np.sin(ang) * radius * knob * 0.86)))
-    cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
+    wide = max(2, int(radius * (0.92 + 0.12 * np.sin(salt))))
+    tall = max(2, int(radius * (0.76 + 0.12 * np.cos(salt * 1.3))))
+    center = (int(round(x)), int(round(y)))
+    cv2.ellipse(mask, center, (wide, tall), float((salt * 23) % 180), 0, 360, amount, -1)
+    cv2.ellipse(
+        mask,
+        (center[0] + int(np.cos(salt) * radius * 0.28), center[1] + int(np.sin(salt * 0.7) * radius * 0.18)),
+        (max(1, wide // 2), max(1, int(tall * 0.46))),
+        float((salt * 47) % 180),
+        0,
+        360,
+        amount * 0.75,
+        -1,
+    )
 
 
 def add_fountain(frame, index):
-    """Broken lava rises into a lumpy crown. Pieces spill off its edge."""
+    """Ragged molten lava rises into a lumpy crown. Pieces spill off its edge."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 126
+    mask = np.zeros(frame.shape[:2], np.float32)
     for strand in range(7):
         lean = (strand - 3) * 13
         phase = strand * 1.15
         for step in range(7):
-            if np.sin(step * 1.8 + phase + index * 0.11) < -0.2:
+            if np.sin(step * 1.8 + phase + index * 0.11) < -0.55:
                 continue
             rise = step / 6
             y = cy - 10 - rise * (cy - 10 - (cap_y + 28))
             wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (8 + rise * 18)
             x = cx + lean * (0.25 + rise) + wobble
             size = 8 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
-            paint_floret(frame, x, y, size, (18, int(78 + 50 * rise), int(190 + 50 * rise)), phase + step)
+            stamp_lobe(mask, x, y, size, phase + step, 1.0)
     florets = (
         (0, 4, 26, 0.62),
         (-24, 8, 20, 0.55),
@@ -276,22 +274,28 @@ def add_fountain(frame, index):
     )
     for slot, (ox, oy, radius, heat) in enumerate(florets):
         sway = np.sin(index * 0.14 + slot) * 2.2
-        x = cx + ox + sway
-        y = cap_y + oy
-        red = int(145 + 80 * heat)
-        green = int(64 + 90 * heat)
-        paint_floret(frame, x, y, radius, (22, green, red), slot * 0.8)
-        if slot % 3 == 0:
-            paint_floret(frame, x + 5, y + 3, radius * 0.38, (12, 36, 90), slot + 2)
-        paint_floret(frame, x + np.cos(slot) * 5, y - radius * 0.35, radius * 0.46, (58, int(140 + 50 * heat), 250), slot)
+        stamp_lobe(mask, cx + ox + sway, cap_y + oy, radius, slot * 0.8, 0.75 + 0.25 * heat)
+        stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
     for side in (-1.0, 1.0):
-        for slot in range(7):
-            fall = (slot * 16 + index * 1.15) % 120
-            x = cx + side * (78 + fall * 0.35)
-            y = cap_y + 10 + 0.011 * fall * fall + slot * 3
-            if y > cy + 150:
+        for slot in range(6):
+            fall = (slot * 16 + index * 1.15) % 110
+            x = cx + side * (70 + fall * 0.28)
+            y = cap_y + 12 + 0.01 * fall * fall + slot * 2
+            if y > cy + 140:
                 continue
-            paint_chunk(frame, x, y, 8, (32, 120, 230), slot + side)
+            stamp_lobe(mask, x, y, 7, slot + side, 0.85)
+    soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
+    core = cv2.GaussianBlur(mask, (21, 21), 5.5)
+    cover = np.clip(soft * 1.45, 0, 1)
+    heart = np.clip((core - 0.25) / 0.75, 0, 1) * cover
+    crust = np.array([14, 58, 150], np.float32)
+    mid = np.array([26, 125, 235], np.float32)
+    glow = np.array([110, 210, 255], np.float32)
+    color = crust * (1 - heart)[..., None] + mid * heart[..., None]
+    color = color * (1 - heart)[..., None] + glow * heart[..., None]
+    alpha = cover[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
 def _unit(vector):
