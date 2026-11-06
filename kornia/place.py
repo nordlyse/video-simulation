@@ -290,7 +290,7 @@ def _pull_back(points, pixels):
 
 
 def lava_limbs(width, height):
-    """A tapering trunk with side limbs that leave at different heights and fork again."""
+    """A trunk that breaks into a dense, root-like crown of thin downhill limbs."""
     scale = np.array([width, height], np.float32)
     center_x = 0.49 * width
 
@@ -307,7 +307,7 @@ def lava_limbs(width, height):
 
     def limb_from(origin, tangent, normal, length, start_w, phase, pinch, end_ratio):
         direction = _unit(normal * 1.05 + np.array([0.0, 1.4], np.float32))
-        bow = normal * (16 if length > 160 else 7)
+        bow = normal * (22 if length > 150 else 12)
         p0 = origin
         p1 = origin + direction * length * 0.3 + tangent * 8
         p2 = origin + direction * length * 0.68 + bow
@@ -315,52 +315,82 @@ def lava_limbs(width, height):
         add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
         return p0, p1, p2, p3, direction
 
-    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase, end_ratio):
+    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase, end_ratio, side=None):
         origin = _bezier_at(p0, p1, p2, p3, t)
         tangent = _bezier_tangent(p0, p1, p2, p3, t)
         normal = np.array([-tangent[1], tangent[0]], np.float32)
-        if (origin[0] - center_x) * normal[0] < 0:
+        if side is None:
+            if (origin[0] - center_x) * normal[0] < 0:
+                normal = -normal
+        elif side * normal[0] < 0:
             normal = -normal
-        limb_from(origin, tangent, normal, length, max(1.1, parent_w), phase, True, end_ratio)
+        limb_from(origin, tangent, normal, length, max(0.9, parent_w), phase, True, end_ratio)
 
-    def grow(parent, t, length, start_w, phase, split, twig, side, fine):
+    def grow(parent, t, length, start_w, phase, side, fine):
         p0, p1, p2, p3 = parent
         origin = _bezier_at(p0, p1, p2, p3, t)
         tangent = _bezier_tangent(p0, p1, p2, p3, t)
         normal = np.array([-tangent[1], tangent[0]], np.float32)
         if side * normal[0] < 0:
             normal = -normal
-        branch = limb_from(origin, tangent, normal, length, start_w, phase, not split, 0.22 if fine else 0.36)
-        if twig:
-            side_twig(*branch[:4], 0.4, 70 if fine else 108, start_w * 0.34, phase + 0.8, 0.2 if fine else 0.3)
-        if split:
-            end = branch[3]
-            direction = branch[4]
-            spreads = (0.05, 0.55, 1.2) if fine else (0.2, 1.0)
-            for slot, spread in enumerate(spreads):
-                tip = _unit(direction * 1.1 + normal * spread + np.array([0.0, 0.45], np.float32))
-                if tip[1] < 0.35:
-                    tip = _unit(np.array([tip[0], 0.35], np.float32))
-                tip_len = length * (0.55 if fine else 0.4)
-                tip_w = max(0.85, start_w * (0.32 if fine else 0.46))
-                c0 = end
-                c1 = end + tip * tip_len * 0.36
-                c2 = end + tip * tip_len * 0.7
-                c3 = end + tip * tip_len
-                add(c0, c1, c2, c3, tip_w, 0.4 if fine else 0.85, phase + slot * 0.4, True)
-                if fine:
-                    side_twig(c0, c1, c2, c3, 0.5, tip_len * 0.62, tip_w * 0.55, phase + slot, 0.18)
+        branch = limb_from(origin, tangent, normal, length, start_w, phase, False, 0.2 if fine else 0.34)
+        spots = (0.28, 0.5, 0.72) if fine else (0.36, 0.66)
+        for slot, spot in enumerate(spots):
+            side_twig(
+                *branch[:4],
+                spot,
+                (64 if fine else 100) - slot * 10,
+                start_w * (0.28 if fine else 0.36),
+                phase + slot * 0.45,
+                0.16 if fine else 0.24,
+            )
+        end = branch[3]
+        direction = branch[4]
+        spreads = (0.0, 0.42, 0.9, 1.4) if fine else (0.15, 0.7, 1.25)
+        for slot, spread in enumerate(spreads):
+            tip = _unit(direction * 1.05 + normal * spread + np.array([0.0, 0.5], np.float32))
+            if tip[1] < 0.32:
+                tip = _unit(np.array([tip[0], 0.32], np.float32))
+            tip_len = length * (0.5 if fine else 0.38)
+            tip_w = max(0.75, start_w * (0.28 if fine else 0.4))
+            c0 = end
+            c1 = end + tip * tip_len * 0.34
+            c2 = end + tip * tip_len * 0.68
+            c3 = end + tip * tip_len
+            add(c0, c1, c2, c3, tip_w, 0.32 if fine else 0.7, phase + slot * 0.35, True)
+            if fine:
+                for hair, extra in ((0.25, 0.2), (0.95, 0.7)):
+                    hair_dir = _unit(tip * 1.05 + normal * hair + np.array([0.0, 0.55], np.float32))
+                    if hair_dir[1] < 0.3:
+                        hair_dir = _unit(np.array([hair_dir[0], 0.3], np.float32))
+                    hair_len = tip_len * 0.46
+                    h0 = c3
+                    add(
+                        h0,
+                        h0 + hair_dir * hair_len * 0.36,
+                        h0 + hair_dir * hair_len * 0.7,
+                        h0 + hair_dir * hair_len,
+                        max(0.65, tip_w * 0.5),
+                        0.28,
+                        phase + slot + extra,
+                        True,
+                    )
 
-    trunk = (at(0.516, 0.338), at(0.508, 0.500), at(0.498, 0.720), at(0.478, 0.990))
-    add(*trunk, 22, 1.6, 0.2, False)
-    grow(trunk, 0.16, 150, 6.6, 0.5, True, True, -1, False)
-    grow(trunk, 0.30, 168, 6.0, 1.3, True, True, 1, False)
-    grow(trunk, 0.44, 180, 4.8, 0.8, True, True, -1, False)
-    grow(trunk, 0.54, 195, 3.6, 1.6, True, True, 1, True)
-    grow(trunk, 0.64, 180, 3.1, 2.3, True, True, -1, True)
-    grow(trunk, 0.74, 165, 2.6, 0.6, True, True, 1, True)
-    grow(trunk, 0.84, 145, 2.2, 1.8, True, False, -1, True)
-    grow(trunk, 0.92, 115, 1.8, 0.3, True, False, 1, True)
+    trunk = (at(0.516, 0.338), at(0.506, 0.520), at(0.492, 0.740), at(0.470, 0.990))
+    add(*trunk, 20, 1.4, 0.2, False)
+    grow(trunk, 0.14, 155, 6.2, 0.4, -1, False)
+    grow(trunk, 0.2, 145, 5.4, 1.1, 1, False)
+    grow(trunk, 0.34, 165, 4.4, 0.7, -1, False)
+    grow(trunk, 0.4, 155, 4.0, 1.6, 1, False)
+    grow(trunk, 0.52, 175, 3.3, 0.9, -1, True)
+    grow(trunk, 0.57, 165, 3.1, 1.8, 1, True)
+    grow(trunk, 0.66, 155, 2.6, 2.2, -1, True)
+    grow(trunk, 0.71, 150, 2.4, 0.5, 1, True)
+    grow(trunk, 0.8, 135, 2.0, 1.4, -1, True)
+    grow(trunk, 0.85, 125, 1.8, 0.8, 1, True)
+    grow(trunk, 0.92, 105, 1.5, 1.9, -1, True)
+    for spot, side, phase in ((0.3, -1, 0.3), (0.46, 1, 0.9), (0.62, -1, 1.4), (0.78, 1, 0.6)):
+        side_twig(*trunk, spot, 72, 2.0, phase, 0.18, side)
     return limbs
 
 
