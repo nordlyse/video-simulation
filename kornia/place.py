@@ -235,42 +235,42 @@ def stamp_lobe(mask, x, y, radius, salt, amount):
 def add_fountain(frame, index):
     """Ragged molten lava rises into a lumpy crown. Pieces spill off its edge."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    cap_y = cy - 126
+    cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
     for strand in range(7):
-        lean = (strand - 3) * 13
+        lean = (strand - 3) * 16
         phase = strand * 1.15
         for step in range(7):
             if np.sin(step * 1.8 + phase + index * 0.11) < -0.55:
                 continue
             rise = step / 6
-            y = cy - 10 - rise * (cy - 10 - (cap_y + 28))
-            wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (8 + rise * 18)
-            x = cx + lean * (0.25 + rise) + wobble
-            size = 8 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
+            y = cy - 10 - rise * (cy - 10 - (cap_y + 22))
+            wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (10 + rise * 24)
+            x = cx + lean * (0.3 + rise) + wobble
+            size = 9 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
             stamp_lobe(mask, x, y, size, phase + step, 1.0)
     florets = (
-        (0, 4, 26, 0.62),
-        (-24, 8, 20, 0.55),
-        (26, 6, 21, 0.58),
-        (-10, -6, 22, 0.8),
-        (12, -8, 20, 0.84),
-        (-38, 2, 16, 0.7),
-        (40, 0, 17, 0.72),
-        (-16, -22, 15, 0.95),
-        (18, -24, 16, 0.96),
-        (0, -26, 14, 1.0),
-        (-52, 6, 13, 0.64),
-        (54, 4, 14, 0.66),
-        (-44, -14, 12, 0.88),
-        (46, -12, 13, 0.86),
-        (-28, -30, 11, 1.0),
-        (30, -32, 12, 1.0),
-        (2, -40, 10, 1.0),
-        (-62, -2, 10, 0.6),
-        (64, -4, 11, 0.62),
-        (-8, 14, 12, 0.5),
-        (14, 16, 11, 0.48),
+        (0, 8, 30, 0.62),
+        (-32, 12, 24, 0.55),
+        (34, 10, 25, 0.58),
+        (-14, -2, 26, 0.8),
+        (16, -4, 24, 0.84),
+        (-50, 6, 19, 0.7),
+        (52, 4, 20, 0.72),
+        (-22, -16, 18, 0.95),
+        (24, -18, 19, 0.96),
+        (0, -20, 17, 1.0),
+        (-68, 10, 16, 0.64),
+        (70, 8, 17, 0.66),
+        (-58, -8, 15, 0.88),
+        (60, -6, 16, 0.86),
+        (-36, -18, 14, 1.0),
+        (38, -20, 15, 1.0),
+        (2, -24, 13, 1.0),
+        (-82, 2, 13, 0.6),
+        (84, 0, 14, 0.62),
+        (-12, 18, 14, 0.5),
+        (16, 20, 13, 0.48),
     )
     for slot, (ox, oy, radius, heat) in enumerate(florets):
         sway = np.sin(index * 0.14 + slot) * 2.2
@@ -279,7 +279,7 @@ def add_fountain(frame, index):
     for side in (-1.0, 1.0):
         for slot in range(6):
             fall = (slot * 16 + index * 1.15) % 110
-            x = cx + side * (70 + fall * 0.28)
+            x = cx + side * (92 + fall * 0.28)
             y = cap_y + 12 + 0.01 * fall * fall + slot * 2
             if y > cy + 140:
                 continue
