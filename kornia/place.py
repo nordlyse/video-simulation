@@ -1,6 +1,6 @@
 """Place the extracted person in a vector eruption.
 
-A ridged cone, darkened clouds, and lava that breaks as it runs downhill.
+A ridged cone, darkened clouds, and lava that branches downhill.
 """
 
 from pathlib import Path
@@ -42,10 +42,6 @@ def person_sprite(frame_width, frame_height):
         scale = (frame_width * 0.42) / sprite.shape[1]
     size = (max(1, int(sprite.shape[1] * scale)), max(1, int(sprite.shape[0] * scale)))
     return cv2.resize(sprite, size, interpolation=cv2.INTER_AREA)
-
-
-def scale_points(width, height, pairs):
-    return [(x * width, y * height) for x, y in pairs]
 
 
 def build_fbm(height, width, rng, octaves):
@@ -216,86 +212,292 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
-def paint_chunk(frame, x, y, size, color, spin):
-    """An angular lava clot."""
-    if size < 1 or not (-size <= x < WIDTH + size and -size <= y < HEIGHT + size):
+def stamp_drop(mask, x, y, length, lean, amount):
+    """A falling drop. The tail points up and the head stays rounded."""
+    if length < 4:
         return
-    pts = []
-    for step, ang in enumerate((0.2, 2.3, 4.2)):
-        radius = size * (1.05 if step == 0 else 0.72)
-        pts.append((int(x + np.cos(ang + spin) * radius), int(y + np.sin(ang + spin) * radius)))
-    cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
+    head = max(2.4, min(7.2, length * 0.30))
+    tail_x = x + lean
+    tail_y = y - length
+    pts = [(tail_x, tail_y)]
+    for step in range(1, 8):
+        t = step / 8
+        wide = head * (t ** 1.2)
+        px = tail_x + (x - tail_x) * t
+        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
+        pts.append((px + wide, py))
+    for step in range(1, 8):
+        ang = step / 7 * np.pi
+        pts.append((x + np.cos(ang) * head * 0.86, y + np.sin(ang) * head * 0.7))
+    for step in range(7, 0, -1):
+        t = step / 8
+        wide = head * (t ** 1.2)
+        px = tail_x + (x - tail_x) * t
+        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
+        pts.append((px - wide, py))
+    contour = np.array([(int(round(px)), int(round(py))) for px, py in pts], np.int32)
+    cv2.fillPoly(mask, [contour], float(amount))
+
+
+def stamp_lobe(mask, x, y, radius, salt, amount):
+    """A stretched lobe. Neighbors melt together after the shared blur."""
+    if radius < 1:
+        return
+    wide = max(2, int(radius * (0.92 + 0.12 * np.sin(salt))))
+    tall = max(2, int(radius * (0.76 + 0.12 * np.cos(salt * 1.3))))
+    center = (int(round(x)), int(round(y)))
+    cv2.ellipse(mask, center, (wide, tall), float((salt * 23) % 180), 0, 360, amount, -1)
+    cv2.ellipse(
+        mask,
+        (center[0] + int(np.cos(salt) * radius * 0.28), center[1] + int(np.sin(salt * 0.7) * radius * 0.18)),
+        (max(1, wide // 2), max(1, int(tall * 0.46))),
+        float((salt * 47) % 180),
+        0,
+        360,
+        amount * 0.75,
+        -1,
+    )
 
 
 def add_fountain(frame, index):
-    """A lava mushroom that keeps rising. Pieces spill off the cap."""
+    """Ragged molten lava rises into a lumpy crown. Pieces spill off its edge."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    cap_y = cy - 132
-    stem = np.array(
-        [[cx - 34, cy - 4], [cx + 34, cy - 4], [cx + 48, cap_y + 18], [cx - 48, cap_y + 18]],
-        np.int32,
+    cap_y = cy - 150
+    mask = np.zeros(frame.shape[:2], np.float32)
+    for strand in range(7):
+        lean = (strand - 3) * 16
+        phase = strand * 1.15
+        for step in range(7):
+            if np.sin(step * 1.8 + phase + index * 0.11) < -0.55:
+                continue
+            rise = step / 6
+            y = cy - 10 - rise * (cy - 10 - (cap_y + 22))
+            wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (10 + rise * 24)
+            x = cx + lean * (0.3 + rise) + wobble
+            size = 9 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
+            stamp_lobe(mask, x, y, size, phase + step, 1.0)
+    florets = (
+        (0, 8, 30, 0.62),
+        (-32, 12, 24, 0.55),
+        (34, 10, 25, 0.58),
+        (-14, -2, 26, 0.8),
+        (16, -4, 24, 0.84),
+        (-50, 6, 19, 0.7),
+        (52, 4, 20, 0.72),
+        (-22, -16, 18, 0.95),
+        (24, -18, 19, 0.96),
+        (0, -20, 17, 1.0),
+        (-68, 10, 16, 0.64),
+        (70, 8, 17, 0.66),
+        (-58, -8, 15, 0.88),
+        (60, -6, 16, 0.86),
+        (-36, -18, 14, 1.0),
+        (38, -20, 15, 1.0),
+        (2, -24, 13, 1.0),
+        (-82, 2, 13, 0.6),
+        (84, 0, 14, 0.62),
+        (-12, 18, 14, 0.5),
+        (16, 20, 13, 0.48),
     )
-    cv2.fillPoly(frame, [stem], (28, 110, 240))
-    cv2.ellipse(frame, (int(cx), int(cap_y)), (124, 44), 0, 0, 360, (46, 160, 255), -1)
-    cv2.ellipse(frame, (int(cx), int(cap_y - 6)), (72, 24), 0, 0, 360, (90, 210, 255), -1)
-    for step in range(16):
-        travel = (step * 9 + index * 2.4) % 128
-        y = cy - 6 - travel
-        if y < cap_y + 10:
-            continue
-        x = cx + np.sin(step * 1.4 + index * 0.2) * 16
-        paint_chunk(frame, x, y, 10, (70, 190, 255), step)
-    for step in range(18):
-        side = -1.0 if step < 9 else 1.0
-        slot = step % 9
-        spread = 16 + (slot * 12 + index * 1.6) % 108
-        x = cx + side * spread
-        y = cap_y - 8 + (spread / 124) * 14
-        paint_chunk(frame, x, y, 11, (64, 184, 255), step * 0.5)
+    for slot, (ox, oy, radius, heat) in enumerate(florets):
+        sway = np.sin(index * 0.14 + slot) * 2.2
+        stamp_lobe(mask, cx + ox + sway, cap_y + oy, radius, slot * 0.8, 0.75 + 0.25 * heat)
+        stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
+    drops = np.zeros(frame.shape[:2], np.float32)
+    heads = np.zeros(frame.shape[:2], np.float32)
     for side in (-1.0, 1.0):
-        for slot in range(7):
-            fall = (slot * 16 + index * 1.15) % 120
-            x = cx + side * (112 + fall * 0.22)
-            y = cap_y + 8 + 0.011 * fall * fall + slot * 3
+        for slot in range(6):
+            fall = (slot * 18 + index * 1.15) % 120
+            x = cx + side * (98 + fall * 0.22)
+            y = cap_y + 20 + 0.012 * fall * fall + slot * 3
             if y > cy + 150:
                 continue
-            paint_chunk(frame, x, y, 8, (32, 120, 230), slot + side)
+            length = 12 + fall * 0.08 + 2.5 * abs(np.sin(slot * 1.7))
+            stamp_drop(drops, x, y, length, -side * (4 + fall * 0.035), 0.95)
+            cv2.ellipse(
+                heads,
+                (int(round(x)), int(round(y))),
+                (max(2, int(length * 0.16)), max(2, int(length * 0.14))),
+                0,
+                0,
+                360,
+                0.9,
+                -1,
+            )
+    soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
+    core = cv2.GaussianBlur(mask, (21, 21), 5.5)
+    drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
+    drop_heart = cv2.GaussianBlur(heads, (5, 5), 1.05)
+    cover = np.clip(np.maximum(soft * 1.45, drop_cover * 1.35), 0, 1)
+    heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
+    heart = np.clip(heart + drop_heart * 0.9, 0, 1)
+    crust = np.array([14, 58, 150], np.float32)
+    mid = np.array([26, 125, 235], np.float32)
+    glow = np.array([110, 210, 255], np.float32)
+    color = crust * (1 - heart)[..., None] + mid * heart[..., None]
+    color = color * (1 - heart)[..., None] + glow * heart[..., None]
+    alpha = cover[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
-def lava_channels(width, height):
-    """Channels leave the crater lip and only step downhill."""
-    return (
-        (
-            scale_points(width, height, ((0.52, 0.31), (0.49, 0.46), (0.45, 0.62), (0.39, 0.80), (0.33, 0.98))),
-            16,
-            24,
-            0.4,
-        ),
-        (
-            scale_points(width, height, ((0.53, 0.32), (0.50, 0.50), (0.46, 0.68), (0.41, 0.84), (0.37, 0.99))),
-            12,
-            18,
-            1.2,
-        ),
-        (
-            scale_points(width, height, ((0.50, 0.36), (0.42, 0.54), (0.32, 0.74), (0.24, 0.98))),
-            11,
-            16,
-            2.0,
-        ),
-        (
-            scale_points(width, height, ((0.47, 0.58), (0.38, 0.76), (0.31, 0.98))),
-            9,
-            13,
-            2.7,
-        ),
-        (
-            scale_points(width, height, ((0.54, 0.32), (0.57, 0.42), (0.60, 0.50), (0.63, 0.58))),
-            10,
-            14,
-            0.6,
-        ),
-    )
+def _unit(vector):
+    norm = float(np.hypot(vector[0], vector[1]))
+    if norm < 1e-4:
+        return np.array([0.0, 1.0], np.float32)
+    return np.asarray(vector, np.float32) / norm
+
+
+def _bezier(p0, p1, p2, p3, count=14):
+    t = np.linspace(0, 1, count, dtype=np.float32)[:, None]
+    u = 1 - t
+    pts = (u ** 3) * p0 + 3 * (u ** 2) * t * p1 + 3 * u * (t ** 2) * p2 + (t ** 3) * p3
+    return pts
+
+
+def _bezier_at(p0, p1, p2, p3, t):
+    u = 1 - t
+    return (u ** 3) * p0 + 3 * (u ** 2) * t * p1 + 3 * u * (t ** 2) * p2 + (t ** 3) * p3
+
+
+def _bezier_tangent(p0, p1, p2, p3, t):
+    u = 1 - t
+    slope = 3 * (u ** 2) * (p1 - p0) + 6 * u * t * (p2 - p1) + 3 * (t ** 2) * (p3 - p2)
+    return _unit(slope)
+
+
+def _pull_back(points, pixels):
+    direction = _unit(points[1] - points[0])
+    extra = points[0] - direction * pixels
+    return np.vstack([extra, points])
+
+
+def lava_limbs(width, height):
+    """A trunk that fans down the cone and stops where the slope meets the ground."""
+    scale = np.array([width, height], np.float32)
+    center_x = 0.49 * width
+    low_y = BASE_Y - 2
+
+    def at(x, y):
+        return np.array([x, y], np.float32) * scale
+
+    limbs = []
+
+    def hold(points):
+        """Keep each step downhill, and stop at the foot of the cone."""
+        held = []
+        for point in points:
+            y = min(float(point[1]), low_y)
+            if held and y < float(held[-1][1]) + 1.5:
+                y = min(float(held[-1][1]) + 1.5, low_y)
+            held.append(np.array([float(point[0]), y], np.float32))
+        return held
+
+    def add(p0, p1, p2, p3, start_w, end_w, phase, pinch):
+        held = hold((p0, p1, p2, p3))
+        curve = _bezier(*held)
+        if pinch or start_w < 20:
+            curve = _pull_back(curve, 8 if start_w < 3.5 else 20)
+        limbs.append((curve, start_w, end_w, phase, pinch))
+        return held
+
+    def limb_from(origin, tangent, normal, length, start_w, phase, pinch, end_ratio):
+        side = float(normal[0])
+        if abs(side) < 0.35:
+            side = float(tangent[0])
+        side = 1.0 if side >= 0 else -1.0
+        droop = 0.7 + 0.28 * abs(float(np.sin(phase * 1.3)))
+        direction = _unit(np.array([side * 0.92, droop], np.float32))
+        bow = np.array([-side * 12.0, 18.0], np.float32)
+        p0 = origin
+        p1 = origin + direction * length * 0.3 + tangent * 8
+        p2 = origin + direction * length * 0.68 + bow
+        p3 = origin + direction * length
+        held = add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
+        return held[0], held[1], held[2], held[3], direction
+
+    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase, end_ratio, side=None):
+        origin = _bezier_at(p0, p1, p2, p3, t)
+        tangent = _bezier_tangent(p0, p1, p2, p3, t)
+        normal = np.array([-tangent[1], tangent[0]], np.float32)
+        if side is None:
+            if (origin[0] - center_x) * normal[0] < 0:
+                normal = -normal
+        elif side * normal[0] < 0:
+            normal = -normal
+        limb_from(origin, tangent, normal, length, max(0.9, parent_w), phase, True, end_ratio)
+
+    def grow(parent, t, length, start_w, phase, side, fine):
+        p0, p1, p2, p3 = parent
+        origin = _bezier_at(p0, p1, p2, p3, t)
+        tangent = _bezier_tangent(p0, p1, p2, p3, t)
+        normal = np.array([-tangent[1], tangent[0]], np.float32)
+        if side * normal[0] < 0:
+            normal = -normal
+        branch = limb_from(origin, tangent, normal, length, start_w, phase, False, 0.2 if fine else 0.34)
+        spots = (0.28, 0.5, 0.72) if fine else (0.36, 0.66)
+        for slot, spot in enumerate(spots):
+            side_twig(
+                *branch[:4],
+                spot,
+                (64 if fine else 100) - slot * 10,
+                start_w * (0.28 if fine else 0.36),
+                phase + slot * 0.45,
+                0.16 if fine else 0.24,
+            )
+        end = branch[3]
+        if float(end[1]) >= low_y - 6:
+            return
+        direction = branch[4]
+        spreads = (0.0, 0.42, 0.9, 1.4) if fine else (0.15, 0.7, 1.25)
+        for slot, spread in enumerate(spreads):
+            tip = _unit(np.array([
+                direction[0] * 0.9 + normal[0] * spread * 0.45,
+                0.48 + 0.12 * (slot % 3),
+            ], np.float32))
+            if tip[1] < 0.35:
+                tip = _unit(np.array([tip[0], 0.35], np.float32))
+            tip_len = length * (0.5 if fine else 0.38)
+            tip_w = max(0.75, start_w * (0.28 if fine else 0.4))
+            c0 = end
+            c1 = end + tip * tip_len * 0.34
+            c2 = end + tip * tip_len * 0.68
+            c3 = end + tip * tip_len
+            add(c0, c1, c2, c3, tip_w, 0.32 if fine else 0.7, phase + slot * 0.35, True)
+            if fine:
+                for hair, extra in ((0.25, 0.2), (0.95, 0.7)):
+                    hair_dir = _unit(np.array([
+                        tip[0] * 1.05 + normal[0] * hair * 0.35,
+                        0.46,
+                    ], np.float32))
+                    if hair_dir[1] < 0.3:
+                        hair_dir = _unit(np.array([hair_dir[0], 0.3], np.float32))
+                    hair_len = tip_len * 0.46
+                    h0 = c3
+                    add(
+                        h0,
+                        h0 + hair_dir * hair_len * 0.36,
+                        h0 + hair_dir * hair_len * 0.7,
+                        h0 + hair_dir * hair_len,
+                        max(0.65, tip_w * 0.5),
+                        0.28,
+                        phase + slot + extra,
+                        True,
+                    )
+
+    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.492, 0.68), at(0.478, 0.84))
+    add(*trunk, 18, 2.4, 0.2, False)
+    grow(trunk, 0.16, 210, 5.8, 0.4, -1, False)
+    grow(trunk, 0.24, 200, 5.2, 1.1, 1, False)
+    grow(trunk, 0.38, 240, 4.4, 0.7, -1, True)
+    grow(trunk, 0.46, 230, 4.0, 1.6, 1, True)
+    grow(trunk, 0.58, 250, 3.4, 0.9, -1, True)
+    grow(trunk, 0.66, 240, 3.1, 1.8, 1, True)
+    grow(trunk, 0.76, 220, 2.6, 2.2, -1, True)
+    grow(trunk, 0.86, 190, 2.2, 0.5, 1, True)
+    for spot, side, phase in ((0.3, -1, 0.3), (0.5, 1, 0.9), (0.68, -1, 1.4)):
+        side_twig(*trunk, spot, 160, 2.4, phase, 0.18, side)
+    return limbs
 
 
 def path_samples(points, count):
@@ -320,15 +522,23 @@ def path_samples(points, count):
     return pos, progress, tangent
 
 
-def meander(pos, phase):
-    """Bend the channel sideways. Y only increases, so the flow runs downhill."""
+def drift_x(y, index):
+    """Sideways drift shared by every limb at the same height, so forks stay joined."""
+    drift = index * 0.02
+    return np.sin(y * 0.045 + drift) * 4 + np.sin(y * 0.095 + 1.1) * 1.6
+
+
+def meander(pos, index):
+    """Bend every limb by the same sideways drift so forks stay joined. Y only increases."""
     out = pos.copy()
     for i in range(len(out)):
-        shift = np.sin(i * 0.42 + phase) * 7 + np.sin(i * 1.05 + phase * 1.2) * 3
-        out[i, 0] += shift
+        out[i, 0] += drift_x(float(out[i, 1]), index)
     for i in range(1, len(out)):
-        if out[i, 1] < out[i - 1, 1] + 3:
-            out[i, 1] = out[i - 1, 1] + 3
+        floor = BASE_Y - 2
+        if out[i, 1] < out[i - 1, 1] + 0.4:
+            out[i, 1] = min(out[i - 1, 1] + 0.4, floor)
+        if out[i, 1] > floor:
+            out[i, 1] = floor
     return out
 
 
@@ -343,89 +553,97 @@ def tangents_of(pos):
     return tangent
 
 
-def crust_slabs(pos, progress, tangent, start_w, end_w, index):
-    """Irregular crust chunks beside a molten lane that keeps running downhill."""
-    slabs = []
-    phase = index * 0.08
-    i = 1
-    while i < len(pos) - 2:
-        span = 2 + int((0.5 + 0.5 * np.sin(i * 0.85 + phase)) * 4)
-        j = min(i + span, len(pos) - 1)
-        side = 1.0 if np.sin(i * 1.37 + phase) > -0.1 else -1.0
-        cover = 0.34 + 0.22 * (0.5 + 0.5 * np.sin(i * 0.6 + phase))
-
-        def edge(k):
-            width = (start_w + (end_w - start_w) * float(progress[k])) * cover
-            nx, ny = -float(tangent[k, 1]), float(tangent[k, 0])
-            cx = pos[k, 0] + nx * width * 0.85 * side
-            cy = pos[k, 1] + ny * width * 0.85 * side
-            return (cx + nx * width, cy + ny * width), (cx - nx * width, cy - ny * width)
-
-        top_a, top_b = edge(i)
-        bot_a, bot_b = edge(j)
-        slabs.append(np.array([top_a, bot_a, bot_b, top_b], np.int32))
-        gap = 1 + int((0.5 + 0.5 * np.sin(i * 2.2 + phase)) * 2)
-        i = j + gap
-    return slabs
+def flow_wave(y, index):
+    """A long soft band that creeps downhill. The same height shares one wave, so forks split it."""
+    return float(np.sin((float(y) - index * 2.0) * 0.024))
 
 
-def jagged_strip(pos, progress, tangent, start_w, end_w, phase, inner):
-    """Even width, a small torn edge, and a pointed end."""
+def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
+    """A smooth limb. Shift moves the lit side toward the upper light."""
     left = []
     right = []
+    light = np.array([-0.45, -0.9], np.float32)
     for i in range(len(pos)):
+        t = float(progress[i])
+        ease = t * t * (3 - 2 * t)
+        width = start_w + (end_w - start_w) * ease
+        if pinch and t > 0.7:
+            width *= (1.0 - t) / 0.3
+        wave = flow_wave(pos[i, 1], index)
+        width *= 0.94 + 0.1 * max(0.0, wave) + 0.04 * np.sin(t * 5.0 + phase)
+        half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
-        width = start_w + (end_w - start_w) * float(progress[i])
-        if progress[i] > 0.88:
-            width *= 1 - (float(progress[i]) - 0.88) / 0.12 * 0.75
-        if inner:
-            width *= 0.46
-        jag = np.sin(i * 2.4 + phase) * 0.1 + np.sin(i * 5.2 + phase * 1.3) * 0.05
-        half = max(1.8, width * (1.0 + jag))
-        left.append((pos[i, 0] + nx * half, pos[i, 1] + ny * half))
-        right.append((pos[i, 0] - nx * half, pos[i, 1] - ny * half))
+        if nx * light[0] + ny * light[1] < 0:
+            nx, ny = -nx, -ny
+        cx = pos[i, 0] + nx * half * shift
+        cy = pos[i, 1] + ny * half * shift
+        px = -float(tangent[i, 1])
+        py = float(tangent[i, 0])
+        left.append((cx + px * half, cy + py * half))
+        right.append((cx - px * half, cy - py * half))
     if len(left) < 2:
         return None
     return np.array(left + right[::-1], np.int32)
 
 
+def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
+    """A soft heat gradient along the limb, so the lava reads as one slow liquid."""
+    for i in range(len(pos) - 1):
+        corners = []
+        heats = []
+        for k in (i, i + 1):
+            t = float(progress[k])
+            ease = t * t * (3 - 2 * t)
+            width = start_w + (end_w - start_w) * ease
+            if pinch and t > 0.7:
+                width *= (1.0 - t) / 0.3
+            wave = max(0.0, flow_wave(pos[k, 1], index))
+            heat = wave * wave * (3 - 2 * wave)
+            half = max(0.35, width * (0.42 + 0.5 * heat))
+            px = -float(tangent[k, 1])
+            py = float(tangent[k, 0])
+            corners.append((pos[k, 0] + px * half, pos[k, 1] + py * half))
+            corners.append((pos[k, 0] - px * half, pos[k, 1] - py * half))
+            heats.append(heat)
+        amount = 0.5 * (heats[0] + heats[1])
+        if amount < 0.02:
+            continue
+        quad = np.array([corners[0], corners[2], corners[3], corners[1]], np.int32)
+        cv2.fillPoly(glow, [quad], int(amount * 255))
+
+
 def paint_channels(frame, index):
-    """Downhill channels. Crust plates ride on the molten core."""
-    crust_color = (14, 16, 42)
-    molten_color = (22, 96, 235)
-    toe_color = (36, 150, 255)
-    slab_color = (10, 12, 28)
-    heat = np.zeros(frame.shape[:2], np.float32)
-    banks = []
-    cores = []
-    toes = []
-    slabs = []
-    for points, start_w, end_w, phase in lava_channels(WIDTH, HEIGHT):
-        pos, progress, _tangent = path_samples(points, 48)
-        pos = meander(pos, phase + index * 0.025)
+    """Slow lava runs from the trunk into thinner forks on the lower slope."""
+    body = np.zeros(frame.shape[:2], np.uint8)
+    lit = np.zeros(frame.shape[:2], np.uint8)
+    glow = np.zeros(frame.shape[:2], np.uint8)
+    for points, start_w, end_w, phase, pinch in lava_limbs(WIDTH, HEIGHT):
+        pos, progress, _tangent = path_samples(points, 42)
+        pos = meander(pos, index)
         tangent = tangents_of(pos)
-        bank = jagged_strip(pos, progress, tangent, start_w, end_w, phase, False)
-        core = jagged_strip(pos, progress, tangent, start_w, end_w, phase, True)
-        if bank is not None:
-            banks.append(bank)
-        if core is not None:
-            cores.append(core)
-        cut = len(pos) // 2
-        toe = jagged_strip(pos[cut:], progress[cut:], tangent[cut:], start_w, end_w, phase, True)
-        if toe is not None:
-            toes.append(toe)
-        slabs.extend(crust_slabs(pos, progress, tangent, start_w, end_w, index))
-    if banks:
-        cv2.fillPoly(frame, banks, crust_color)
-    if cores:
-        cv2.fillPoly(frame, cores, molten_color)
-        cv2.fillPoly(heat, cores, 1)
-    if toes:
-        cv2.fillPoly(frame, toes, toe_color)
-    if slabs:
-        cv2.fillPoly(frame, slabs, slab_color)
-        cv2.fillPoly(heat, slabs, 0.12)
+        limb = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 1.0, 0.0, index)
+        shine = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 0.62, 0.55, index)
+        if limb is not None:
+            cv2.fillPoly(body, [limb], 255)
+        if shine is not None:
+            cv2.fillPoly(lit, [shine], 255)
+        paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index)
+    cover = cv2.GaussianBlur(body, (5, 5), 1.05).astype(np.float32) / 255
+    light = cv2.GaussianBlur(lit, (5, 5), 1.0).astype(np.float32) / 255
+    heart = cv2.GaussianBlur(glow, (15, 15), 3.0).astype(np.float32) / 255
+    cover = np.clip(cover, 0, 1)
+    light = np.clip(light, 0, 1) * cover
+    heart = np.clip(heart, 0, 1) * cover
+    crust = np.array([14, 32, 96], np.float32)
+    mid = np.array([16, 62, 148], np.float32)
+    core = np.array([96, 196, 255], np.float32)
+    color = crust * (1 - light)[..., None] + mid * light[..., None]
+    color = color * (1 - heart)[..., None] + core * heart[..., None]
+    alpha = cover[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
+    heat = np.clip(cover * 0.45 + light * 0.4 + heart * 0.7, 0, 1)
     fringe = cv2.GaussianBlur(heat, (5, 5), 1.1)
     fringe = np.clip(fringe - heat, 0, 1)
     warm = fringe[..., None] * np.array([10, 40, 90], np.float32)
