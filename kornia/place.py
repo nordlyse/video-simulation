@@ -223,36 +223,72 @@ def paint_chunk(frame, x, y, size, color, spin):
     cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
 
 
+def paint_floret(frame, x, y, radius, color, salt):
+    """A soft lumpy floret. Mild knobs keep it from being a disc or a star."""
+    if radius < 1:
+        return
+    pts = []
+    for step in range(12):
+        ang = step / 12 * np.pi * 2 + salt * 0.15
+        knob = 0.9 + 0.14 * np.sin(step * 2.2 + salt)
+        pts.append((int(x + np.cos(ang) * radius * knob), int(y + np.sin(ang) * radius * knob * 0.86)))
+    cv2.fillPoly(frame, [np.array(pts, np.int32)], color)
+
+
 def add_fountain(frame, index):
-    """A lava mushroom that keeps rising. Pieces spill off the cap."""
+    """Broken lava rises into a lumpy crown. Pieces spill off its edge."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    cap_y = cy - 132
-    stem = np.array(
-        [[cx - 34, cy - 4], [cx + 34, cy - 4], [cx + 48, cap_y + 18], [cx - 48, cap_y + 18]],
-        np.int32,
+    cap_y = cy - 126
+    for strand in range(7):
+        lean = (strand - 3) * 13
+        phase = strand * 1.15
+        for step in range(7):
+            if np.sin(step * 1.8 + phase + index * 0.11) < -0.2:
+                continue
+            rise = step / 6
+            y = cy - 10 - rise * (cy - 10 - (cap_y + 28))
+            wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (8 + rise * 18)
+            x = cx + lean * (0.25 + rise) + wobble
+            size = 8 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
+            paint_floret(frame, x, y, size, (18, int(78 + 50 * rise), int(190 + 50 * rise)), phase + step)
+    florets = (
+        (0, 4, 26, 0.62),
+        (-24, 8, 20, 0.55),
+        (26, 6, 21, 0.58),
+        (-10, -6, 22, 0.8),
+        (12, -8, 20, 0.84),
+        (-38, 2, 16, 0.7),
+        (40, 0, 17, 0.72),
+        (-16, -22, 15, 0.95),
+        (18, -24, 16, 0.96),
+        (0, -26, 14, 1.0),
+        (-52, 6, 13, 0.64),
+        (54, 4, 14, 0.66),
+        (-44, -14, 12, 0.88),
+        (46, -12, 13, 0.86),
+        (-28, -30, 11, 1.0),
+        (30, -32, 12, 1.0),
+        (2, -40, 10, 1.0),
+        (-62, -2, 10, 0.6),
+        (64, -4, 11, 0.62),
+        (-8, 14, 12, 0.5),
+        (14, 16, 11, 0.48),
     )
-    cv2.fillPoly(frame, [stem], (28, 110, 240))
-    cv2.ellipse(frame, (int(cx), int(cap_y)), (124, 44), 0, 0, 360, (46, 160, 255), -1)
-    cv2.ellipse(frame, (int(cx), int(cap_y - 6)), (72, 24), 0, 0, 360, (90, 210, 255), -1)
-    for step in range(16):
-        travel = (step * 9 + index * 2.4) % 128
-        y = cy - 6 - travel
-        if y < cap_y + 10:
-            continue
-        x = cx + np.sin(step * 1.4 + index * 0.2) * 16
-        paint_chunk(frame, x, y, 10, (70, 190, 255), step)
-    for step in range(18):
-        side = -1.0 if step < 9 else 1.0
-        slot = step % 9
-        spread = 16 + (slot * 12 + index * 1.6) % 108
-        x = cx + side * spread
-        y = cap_y - 8 + (spread / 124) * 14
-        paint_chunk(frame, x, y, 11, (64, 184, 255), step * 0.5)
+    for slot, (ox, oy, radius, heat) in enumerate(florets):
+        sway = np.sin(index * 0.14 + slot) * 2.2
+        x = cx + ox + sway
+        y = cap_y + oy
+        red = int(145 + 80 * heat)
+        green = int(64 + 90 * heat)
+        paint_floret(frame, x, y, radius, (22, green, red), slot * 0.8)
+        if slot % 3 == 0:
+            paint_floret(frame, x + 5, y + 3, radius * 0.38, (12, 36, 90), slot + 2)
+        paint_floret(frame, x + np.cos(slot) * 5, y - radius * 0.35, radius * 0.46, (58, int(140 + 50 * heat), 250), slot)
     for side in (-1.0, 1.0):
         for slot in range(7):
             fall = (slot * 16 + index * 1.15) % 120
-            x = cx + side * (112 + fall * 0.22)
-            y = cap_y + 8 + 0.011 * fall * fall + slot * 3
+            x = cx + side * (78 + fall * 0.35)
+            y = cap_y + 10 + 0.011 * fall * fall + slot * 3
             if y > cy + 150:
                 continue
             paint_chunk(frame, x, y, 8, (32, 120, 230), slot + side)
