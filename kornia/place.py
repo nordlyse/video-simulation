@@ -290,10 +290,10 @@ def _pull_back(points, pixels):
 
 
 def lava_limbs(width, height):
-    """A short trunk that fans sideways into a dense, root-like sheet."""
+    """A trunk that fans down the cone and stops where the slope meets the ground."""
     scale = np.array([width, height], np.float32)
     center_x = 0.49 * width
-    low_y = 0.58 * height
+    low_y = BASE_Y - 2
 
     def at(x, y):
         return np.array([x, y], np.float32) * scale
@@ -301,34 +301,37 @@ def lava_limbs(width, height):
     limbs = []
 
     def hold(points):
-        """Keep each step downhill, and stop the sheet before the foot of the cone."""
-        held = [np.array(points[0], np.float32)]
-        for point in points[1:]:
-            y = min(max(float(point[1]), float(held[-1][1]) + 1.5), low_y)
+        """Keep each step downhill, and stop at the foot of the cone."""
+        held = []
+        for point in points:
+            y = min(float(point[1]), low_y)
+            if held and y < float(held[-1][1]) + 1.5:
+                y = min(float(held[-1][1]) + 1.5, low_y)
             held.append(np.array([float(point[0]), y], np.float32))
         return held
 
     def add(p0, p1, p2, p3, start_w, end_w, phase, pinch):
-        p0, p1, p2, p3 = hold((p0, p1, p2, p3))
-        curve = _bezier(p0, p1, p2, p3)
+        held = hold((p0, p1, p2, p3))
+        curve = _bezier(*held)
         if pinch or start_w < 20:
             curve = _pull_back(curve, 8 if start_w < 3.5 else 20)
         limbs.append((curve, start_w, end_w, phase, pinch))
+        return held
 
     def limb_from(origin, tangent, normal, length, start_w, phase, pinch, end_ratio):
         side = float(normal[0])
         if abs(side) < 0.35:
             side = float(tangent[0])
         side = 1.0 if side >= 0 else -1.0
-        droop = 0.1 + 0.2 * abs(float(np.sin(phase * 1.7)))
-        direction = _unit(np.array([side * 1.45, droop], np.float32))
-        bow = np.array([-side * 14.0, 10.0], np.float32)
+        droop = 0.7 + 0.28 * abs(float(np.sin(phase * 1.3)))
+        direction = _unit(np.array([side * 0.92, droop], np.float32))
+        bow = np.array([-side * 12.0, 18.0], np.float32)
         p0 = origin
         p1 = origin + direction * length * 0.3 + tangent * 8
         p2 = origin + direction * length * 0.68 + bow
         p3 = origin + direction * length
-        add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
-        return p0, p1, p2, p3, direction
+        held = add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
+        return held[0], held[1], held[2], held[3], direction
 
     def side_twig(p0, p1, p2, p3, t, length, parent_w, phase, end_ratio, side=None):
         origin = _bezier_at(p0, p1, p2, p3, t)
@@ -360,15 +363,17 @@ def lava_limbs(width, height):
                 0.16 if fine else 0.24,
             )
         end = branch[3]
+        if float(end[1]) >= low_y - 6:
+            return
         direction = branch[4]
         spreads = (0.0, 0.42, 0.9, 1.4) if fine else (0.15, 0.7, 1.25)
         for slot, spread in enumerate(spreads):
             tip = _unit(np.array([
-                direction[0] * 0.85 + normal[0] * spread * 0.7,
-                0.08 + 0.1 * (slot % 3),
+                direction[0] * 0.9 + normal[0] * spread * 0.45,
+                0.48 + 0.12 * (slot % 3),
             ], np.float32))
-            if tip[1] < 0.08:
-                tip = _unit(np.array([tip[0], 0.08], np.float32))
+            if tip[1] < 0.35:
+                tip = _unit(np.array([tip[0], 0.35], np.float32))
             tip_len = length * (0.5 if fine else 0.38)
             tip_w = max(0.75, start_w * (0.28 if fine else 0.4))
             c0 = end
@@ -378,9 +383,12 @@ def lava_limbs(width, height):
             add(c0, c1, c2, c3, tip_w, 0.32 if fine else 0.7, phase + slot * 0.35, True)
             if fine:
                 for hair, extra in ((0.25, 0.2), (0.95, 0.7)):
-                    hair_dir = _unit(tip * 1.2 + normal * hair + np.array([0.0, 0.14], np.float32))
-                    if hair_dir[1] < 0.08:
-                        hair_dir = _unit(np.array([hair_dir[0], 0.08], np.float32))
+                    hair_dir = _unit(np.array([
+                        tip[0] * 1.05 + normal[0] * hair * 0.35,
+                        0.46,
+                    ], np.float32))
+                    if hair_dir[1] < 0.3:
+                        hair_dir = _unit(np.array([hair_dir[0], 0.3], np.float32))
                     hair_len = tip_len * 0.46
                     h0 = c3
                     add(
@@ -394,18 +402,18 @@ def lava_limbs(width, height):
                         True,
                     )
 
-    trunk = (at(0.518, 0.348), at(0.510, 0.400), at(0.504, 0.455), at(0.498, 0.505))
-    add(*trunk, 18, 4.2, 0.2, False)
-    grow(trunk, 0.18, 130, 5.8, 0.4, -1, False)
-    grow(trunk, 0.26, 125, 5.2, 1.1, 1, False)
-    grow(trunk, 0.4, 150, 4.2, 0.7, -1, True)
-    grow(trunk, 0.48, 145, 3.8, 1.6, 1, True)
-    grow(trunk, 0.62, 160, 3.2, 0.9, -1, True)
-    grow(trunk, 0.7, 155, 2.9, 1.8, 1, True)
-    grow(trunk, 0.82, 140, 2.4, 2.2, -1, True)
-    grow(trunk, 0.9, 125, 2.1, 0.5, 1, True)
-    for spot, side, phase in ((0.34, -1, 0.3), (0.52, 1, 0.9), (0.7, -1, 1.4)):
-        side_twig(*trunk, spot, 110, 2.2, phase, 0.18, side)
+    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.492, 0.68), at(0.478, 0.84))
+    add(*trunk, 18, 2.4, 0.2, False)
+    grow(trunk, 0.16, 210, 5.8, 0.4, -1, False)
+    grow(trunk, 0.24, 200, 5.2, 1.1, 1, False)
+    grow(trunk, 0.38, 240, 4.4, 0.7, -1, True)
+    grow(trunk, 0.46, 230, 4.0, 1.6, 1, True)
+    grow(trunk, 0.58, 250, 3.4, 0.9, -1, True)
+    grow(trunk, 0.66, 240, 3.1, 1.8, 1, True)
+    grow(trunk, 0.76, 220, 2.6, 2.2, -1, True)
+    grow(trunk, 0.86, 190, 2.2, 0.5, 1, True)
+    for spot, side, phase in ((0.3, -1, 0.3), (0.5, 1, 0.9), (0.68, -1, 1.4)):
+        side_twig(*trunk, spot, 160, 2.4, phase, 0.18, side)
     return limbs
 
 
@@ -443,8 +451,11 @@ def meander(pos, index):
     for i in range(len(out)):
         out[i, 0] += drift_x(float(out[i, 1]), index)
     for i in range(1, len(out)):
+        floor = BASE_Y - 2
         if out[i, 1] < out[i - 1, 1] + 0.4:
-            out[i, 1] = out[i - 1, 1] + 0.4
+            out[i, 1] = min(out[i - 1, 1] + 0.4, floor)
+        if out[i, 1] > floor:
+            out[i, 1] = floor
     return out
 
 
