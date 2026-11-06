@@ -212,6 +212,33 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
+def stamp_drop(mask, x, y, length, lean, amount):
+    """A falling drop. The tail points up and the head stays rounded."""
+    if length < 4:
+        return
+    head = max(2.4, min(7.2, length * 0.30))
+    tail_x = x + lean
+    tail_y = y - length
+    pts = [(tail_x, tail_y)]
+    for step in range(1, 8):
+        t = step / 8
+        wide = head * (t ** 1.2)
+        px = tail_x + (x - tail_x) * t
+        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
+        pts.append((px + wide, py))
+    for step in range(1, 8):
+        ang = step / 7 * np.pi
+        pts.append((x + np.cos(ang) * head * 0.86, y + np.sin(ang) * head * 0.7))
+    for step in range(7, 0, -1):
+        t = step / 8
+        wide = head * (t ** 1.2)
+        px = tail_x + (x - tail_x) * t
+        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
+        pts.append((px - wide, py))
+    contour = np.array([(int(round(px)), int(round(py))) for px, py in pts], np.int32)
+    cv2.fillPoly(mask, [contour], float(amount))
+
+
 def stamp_lobe(mask, x, y, radius, salt, amount):
     """A stretched lobe. Neighbors melt together after the shared blur."""
     if radius < 1:
@@ -276,18 +303,34 @@ def add_fountain(frame, index):
         sway = np.sin(index * 0.14 + slot) * 2.2
         stamp_lobe(mask, cx + ox + sway, cap_y + oy, radius, slot * 0.8, 0.75 + 0.25 * heat)
         stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
+    drops = np.zeros(frame.shape[:2], np.float32)
+    heads = np.zeros(frame.shape[:2], np.float32)
     for side in (-1.0, 1.0):
         for slot in range(6):
-            fall = (slot * 16 + index * 1.15) % 110
-            x = cx + side * (92 + fall * 0.28)
-            y = cap_y + 12 + 0.01 * fall * fall + slot * 2
-            if y > cy + 140:
+            fall = (slot * 18 + index * 1.15) % 120
+            x = cx + side * (98 + fall * 0.22)
+            y = cap_y + 20 + 0.012 * fall * fall + slot * 3
+            if y > cy + 150:
                 continue
-            stamp_lobe(mask, x, y, 7, slot + side, 0.85)
+            length = 12 + fall * 0.08 + 2.5 * abs(np.sin(slot * 1.7))
+            stamp_drop(drops, x, y, length, -side * (4 + fall * 0.035), 0.95)
+            cv2.ellipse(
+                heads,
+                (int(round(x)), int(round(y))),
+                (max(2, int(length * 0.16)), max(2, int(length * 0.14))),
+                0,
+                0,
+                360,
+                0.9,
+                -1,
+            )
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
     core = cv2.GaussianBlur(mask, (21, 21), 5.5)
-    cover = np.clip(soft * 1.45, 0, 1)
-    heart = np.clip((core - 0.25) / 0.75, 0, 1) * cover
+    drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
+    drop_heart = cv2.GaussianBlur(heads, (5, 5), 1.05)
+    cover = np.clip(np.maximum(soft * 1.45, drop_cover * 1.35), 0, 1)
+    heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
+    heart = np.clip(heart + drop_heart * 0.9, 0, 1)
     crust = np.array([14, 58, 150], np.float32)
     mid = np.array([26, 125, 235], np.float32)
     glow = np.array([110, 210, 255], np.float32)
