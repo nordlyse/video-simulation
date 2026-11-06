@@ -32,7 +32,7 @@ The image base is `python:3.12-slim`. Python is PSF-2.0. pip, which ships with t
 
 Kornia keeps only the person from the camera frame. MediaPipe 1.2.2 and its selfie segmenter model are Apache-2.0. The image also installs opencv-python-headless 5.0.0.93, absl-py 2.5.1 and flatbuffers 25.12.19, all Apache-2.0. MediaPipe imports certifi 2026.10.23, which is MPL-2.0, and matplotlib. If the frame has no person, the stored frame is empty.
 
-The erupting volcano is a vector scene. A wide cone with ridges and gullies stands in front of hazy ridges, under soft gray clouds. Ash billows out of the crater. Lava keeps rising from the vent as a mushroom column, and pieces spill from the cap down the flanks, while a dense root-like crown of thin limbs spreads as slow lava runs down from the trunk. The extracted person stands in the foreground and is shaded from that lava: the side toward the flow is warmer and the far side is darker. The result is `frames/ready/volcano.mp4`.
+The erupting volcano is a vector scene. A wide cone with ridges and gullies stands in front of hazy ridges, under soft gray clouds. Ash billows out of the crater. Lava keeps rising from the vent as a mushroom column, and pieces spill from the cap down the flanks, while a dense root-like sheet of thin limbs spreads sideways as slow lava runs out from the trunk. The extracted person stands in the foreground and is shaded from that lava: the side toward the flow is warmer and the far side is darker. The result is `frames/ready/volcano.mp4`.
 
 The local camera app is separate from Compose. It uses PyObjC 13.0, which is MIT:
 
