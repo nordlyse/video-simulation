@@ -302,64 +302,65 @@ def lava_limbs(width, height):
     def add(p0, p1, p2, p3, start_w, end_w, phase, pinch):
         curve = _bezier(p0, p1, p2, p3)
         if pinch or start_w < 20:
-            curve = _pull_back(curve, 26)
+            curve = _pull_back(curve, 8 if start_w < 3.5 else 20)
         limbs.append((curve, start_w, end_w, phase, pinch))
 
-    def limb_from(origin, tangent, normal, length, start_w, phase, pinch):
+    def limb_from(origin, tangent, normal, length, start_w, phase, pinch, end_ratio):
         direction = _unit(normal * 1.05 + np.array([0.0, 1.4], np.float32))
-        bow = normal * (26 if length > 160 else 14)
+        bow = normal * (16 if length > 160 else 7)
         p0 = origin
-        p1 = origin + direction * length * 0.3 + tangent * 10
+        p1 = origin + direction * length * 0.3 + tangent * 8
         p2 = origin + direction * length * 0.68 + bow
         p3 = origin + direction * length
-        add(p0, p1, p2, p3, start_w, max(1.2, start_w * 0.38), phase, pinch)
+        add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
         return p0, p1, p2, p3, direction
 
-    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase):
+    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase, end_ratio):
         origin = _bezier_at(p0, p1, p2, p3, t)
         tangent = _bezier_tangent(p0, p1, p2, p3, t)
         normal = np.array([-tangent[1], tangent[0]], np.float32)
         if (origin[0] - center_x) * normal[0] < 0:
             normal = -normal
-        limb_from(origin, tangent, normal, length, max(2.2, parent_w), phase, True)
+        limb_from(origin, tangent, normal, length, max(1.1, parent_w), phase, True, end_ratio)
 
-    def grow(parent, t, length, start_w, phase, split, twig, side):
+    def grow(parent, t, length, start_w, phase, split, twig, side, fine):
         p0, p1, p2, p3 = parent
         origin = _bezier_at(p0, p1, p2, p3, t)
         tangent = _bezier_tangent(p0, p1, p2, p3, t)
         normal = np.array([-tangent[1], tangent[0]], np.float32)
         if side * normal[0] < 0:
             normal = -normal
-        branch = limb_from(origin, tangent, normal, length, start_w, phase, not split)
+        branch = limb_from(origin, tangent, normal, length, start_w, phase, not split, 0.22 if fine else 0.36)
         if twig:
-            side_twig(*branch[:4], 0.36, 118, start_w * 0.42, phase + 0.8)
-            if length > 200:
-                side_twig(*branch[:4], 0.66, 86, start_w * 0.32, phase + 1.7)
+            side_twig(*branch[:4], 0.4, 70 if fine else 108, start_w * 0.34, phase + 0.8, 0.2 if fine else 0.3)
         if split:
             end = branch[3]
             direction = branch[4]
-            for spread, tip_phase in ((0.18, 0.5), (0.95, 1.4)):
-                tip = _unit(direction * 1.15 + normal * spread + np.array([0.0, 0.4], np.float32))
+            spreads = (0.05, 0.55, 1.2) if fine else (0.2, 1.0)
+            for slot, spread in enumerate(spreads):
+                tip = _unit(direction * 1.1 + normal * spread + np.array([0.0, 0.45], np.float32))
                 if tip[1] < 0.35:
                     tip = _unit(np.array([tip[0], 0.35], np.float32))
-                tip_len = length * 0.42
-                tip_w = max(2.3, start_w * 0.44)
+                tip_len = length * (0.55 if fine else 0.4)
+                tip_w = max(0.85, start_w * (0.32 if fine else 0.46))
                 c0 = end
-                c1 = end + tip * tip_len * 0.38
-                c2 = end + tip * tip_len * 0.72
+                c1 = end + tip * tip_len * 0.36
+                c2 = end + tip * tip_len * 0.7
                 c3 = end + tip * tip_len
-                add(c0, c1, c2, c3, tip_w, 0.95, phase + tip_phase, True)
-                if length > 210:
-                    side_twig(c0, c1, c2, c3, 0.55, tip_len * 0.5, tip_w * 0.62, phase + tip_phase + 0.6)
+                add(c0, c1, c2, c3, tip_w, 0.4 if fine else 0.85, phase + slot * 0.4, True)
+                if fine:
+                    side_twig(c0, c1, c2, c3, 0.5, tip_len * 0.62, tip_w * 0.55, phase + slot, 0.18)
 
     trunk = (at(0.516, 0.338), at(0.508, 0.500), at(0.498, 0.720), at(0.478, 0.990))
-    add(*trunk, 24, 2.2, 0.2, False)
-    grow(trunk, 0.14, 155, 7.0, 0.5, True, True, -1)
-    grow(trunk, 0.26, 175, 7.6, 1.3, True, True, 1)
-    grow(trunk, 0.39, 205, 8.2, 0.8, True, True, -1)
-    grow(trunk, 0.52, 240, 7.4, 1.9, True, True, 1)
-    grow(trunk, 0.65, 220, 6.6, 2.5, True, True, -1)
-    grow(trunk, 0.78, 175, 5.4, 0.4, True, True, 1)
+    add(*trunk, 22, 1.6, 0.2, False)
+    grow(trunk, 0.16, 150, 6.6, 0.5, True, True, -1, False)
+    grow(trunk, 0.30, 168, 6.0, 1.3, True, True, 1, False)
+    grow(trunk, 0.44, 180, 4.8, 0.8, True, True, -1, False)
+    grow(trunk, 0.54, 195, 3.6, 1.6, True, True, 1, True)
+    grow(trunk, 0.64, 180, 3.1, 2.3, True, True, -1, True)
+    grow(trunk, 0.74, 165, 2.6, 0.6, True, True, 1, True)
+    grow(trunk, 0.84, 145, 2.2, 1.8, True, False, -1, True)
+    grow(trunk, 0.92, 115, 1.8, 0.3, True, False, 1, True)
     return limbs
 
 
@@ -414,8 +415,8 @@ def tangents_of(pos):
 
 
 def flow_wave(y, index):
-    """A bright band that steps downhill. The same height shares one wave, so forks split it."""
-    return float(np.sin((float(y) - index * 6.4) * 0.04))
+    """A long soft band that creeps downhill. The same height shares one wave, so forks split it."""
+    return float(np.sin((float(y) - index * 2.0) * 0.024))
 
 
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
@@ -447,48 +448,39 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
     return np.array(left + right[::-1], np.int32)
 
 
-def flow_tongues(pos, progress, tangent, start_w, end_w, pinch, index):
-    """Short molten tongues. They ride the downhill wave and split with the branches."""
-    hot = [flow_wave(pos[i, 1], index) for i in range(len(pos))]
-    tongues = []
-    start = None
-    flags = [value > 0.12 for value in hot] + [False]
-    for i, flag in enumerate(flags):
-        if flag and start is None:
-            start = i
-        elif not flag and start is not None:
-            if i - start >= 2:
-                tongues.append(_tongue_poly(pos, tangent, progress, start_w, end_w, pinch, hot, start, i - 1))
-            start = None
-    return tongues
-
-
-def _tongue_poly(pos, tangent, progress, start_w, end_w, pinch, hot, i0, i1):
-    left = []
-    right = []
-    peak = max(hot[i0 : i1 + 1])
-    for i in range(i0, i1 + 1):
-        t = float(progress[i])
-        ease = t * t * (3 - 2 * t)
-        width = start_w + (end_w - start_w) * ease
-        if pinch and t > 0.7:
-            width *= (1.0 - t) / 0.3
-        bell = 0.0 if peak < 1e-4 else max(0.0, hot[i]) / peak
-        half = max(0.55, width * (0.48 + 0.46 * bell))
-        px = -float(tangent[i, 1])
-        py = float(tangent[i, 0])
-        left.append((pos[i, 0] + px * half, pos[i, 1] + py * half))
-        right.append((pos[i, 0] - px * half, pos[i, 1] - py * half))
-    return np.array(left + right[::-1], np.int32)
+def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
+    """A soft heat gradient along the limb, so the lava reads as one slow liquid."""
+    for i in range(len(pos) - 1):
+        corners = []
+        heats = []
+        for k in (i, i + 1):
+            t = float(progress[k])
+            ease = t * t * (3 - 2 * t)
+            width = start_w + (end_w - start_w) * ease
+            if pinch and t > 0.7:
+                width *= (1.0 - t) / 0.3
+            wave = max(0.0, flow_wave(pos[k, 1], index))
+            heat = wave * wave * (3 - 2 * wave)
+            half = max(0.35, width * (0.42 + 0.5 * heat))
+            px = -float(tangent[k, 1])
+            py = float(tangent[k, 0])
+            corners.append((pos[k, 0] + px * half, pos[k, 1] + py * half))
+            corners.append((pos[k, 0] - px * half, pos[k, 1] - py * half))
+            heats.append(heat)
+        amount = 0.5 * (heats[0] + heats[1])
+        if amount < 0.02:
+            continue
+        quad = np.array([corners[0], corners[2], corners[3], corners[1]], np.int32)
+        cv2.fillPoly(glow, [quad], int(amount * 255))
 
 
 def paint_channels(frame, index):
-    """Round downhill branches. Molten tongues run down the forks to both sides."""
+    """Slow lava runs from the trunk into thinner forks on the lower slope."""
     body = np.zeros(frame.shape[:2], np.uint8)
     lit = np.zeros(frame.shape[:2], np.uint8)
     glow = np.zeros(frame.shape[:2], np.uint8)
     for points, start_w, end_w, phase, pinch in lava_limbs(WIDTH, HEIGHT):
-        pos, progress, _tangent = path_samples(points, 48)
+        pos, progress, _tangent = path_samples(points, 42)
         pos = meander(pos, index)
         tangent = tangents_of(pos)
         limb = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 1.0, 0.0, index)
@@ -497,17 +489,16 @@ def paint_channels(frame, index):
             cv2.fillPoly(body, [limb], 255)
         if shine is not None:
             cv2.fillPoly(lit, [shine], 255)
-        for tongue in flow_tongues(pos, progress, tangent, start_w, end_w, pinch, index):
-            cv2.fillPoly(glow, [tongue], 255)
+        paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index)
     cover = cv2.GaussianBlur(body, (5, 5), 1.05).astype(np.float32) / 255
     light = cv2.GaussianBlur(lit, (5, 5), 1.0).astype(np.float32) / 255
-    heart = cv2.GaussianBlur(glow, (7, 7), 1.5).astype(np.float32) / 255
+    heart = cv2.GaussianBlur(glow, (15, 15), 3.0).astype(np.float32) / 255
     cover = np.clip(cover, 0, 1)
     light = np.clip(light, 0, 1) * cover
     heart = np.clip(heart, 0, 1) * cover
     crust = np.array([14, 32, 96], np.float32)
-    mid = np.array([30, 128, 248], np.float32)
-    core = np.array([115, 205, 255], np.float32)
+    mid = np.array([16, 62, 148], np.float32)
+    core = np.array([96, 196, 255], np.float32)
     color = crust * (1 - light)[..., None] + mid * light[..., None]
     color = color * (1 - heart)[..., None] + core * heart[..., None]
     alpha = cover[..., None]
