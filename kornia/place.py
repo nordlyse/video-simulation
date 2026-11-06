@@ -315,13 +315,13 @@ def lava_limbs(width, height):
         add(p0, p1, p2, p3, start_w, max(1.2, start_w * 0.38), phase, pinch)
         return p0, p1, p2, p3, direction
 
-    def side_twig(p0, p1, p2, p3, t, parent_w, phase):
+    def side_twig(p0, p1, p2, p3, t, length, parent_w, phase):
         origin = _bezier_at(p0, p1, p2, p3, t)
         tangent = _bezier_tangent(p0, p1, p2, p3, t)
         normal = np.array([-tangent[1], tangent[0]], np.float32)
         if (origin[0] - center_x) * normal[0] < 0:
             normal = -normal
-        limb_from(origin, tangent, normal, 92, parent_w, phase, True)
+        limb_from(origin, tangent, normal, length, max(2.2, parent_w), phase, True)
 
     def grow(parent, t, length, start_w, phase, split, twig, side):
         p0, p1, p2, p3 = parent
@@ -332,7 +332,9 @@ def lava_limbs(width, height):
             normal = -normal
         branch = limb_from(origin, tangent, normal, length, start_w, phase, not split)
         if twig:
-            side_twig(*branch[:4], 0.48, start_w * 0.42, phase + 1.4)
+            side_twig(*branch[:4], 0.36, 118, start_w * 0.42, phase + 0.8)
+            if length > 200:
+                side_twig(*branch[:4], 0.66, 86, start_w * 0.32, phase + 1.7)
         if split:
             end = branch[3]
             direction = branch[4]
@@ -340,24 +342,24 @@ def lava_limbs(width, height):
                 tip = _unit(direction * 1.15 + normal * spread + np.array([0.0, 0.4], np.float32))
                 if tip[1] < 0.35:
                     tip = _unit(np.array([tip[0], 0.35], np.float32))
-                tip_len = length * 0.46
-                add(
-                    end,
-                    end + tip * tip_len * 0.38,
-                    end + tip * tip_len * 0.72,
-                    end + tip * tip_len,
-                    max(2.4, start_w * 0.46),
-                    0.95,
-                    phase + tip_phase,
-                    True,
-                )
+                tip_len = length * 0.42
+                tip_w = max(2.3, start_w * 0.44)
+                c0 = end
+                c1 = end + tip * tip_len * 0.38
+                c2 = end + tip * tip_len * 0.72
+                c3 = end + tip * tip_len
+                add(c0, c1, c2, c3, tip_w, 0.95, phase + tip_phase, True)
+                if length > 210:
+                    side_twig(c0, c1, c2, c3, 0.55, tip_len * 0.5, tip_w * 0.62, phase + tip_phase + 0.6)
 
     trunk = (at(0.516, 0.338), at(0.508, 0.500), at(0.498, 0.720), at(0.478, 0.990))
     add(*trunk, 24, 2.2, 0.2, False)
-    grow(trunk, 0.20, 190, 8.4, 1.2, False, True, -1)
-    grow(trunk, 0.36, 210, 8.8, 0.6, True, False, 1)
-    grow(trunk, 0.54, 270, 7.4, 2.1, True, True, -1)
-    grow(trunk, 0.72, 240, 6.2, 1.5, True, True, 1)
+    grow(trunk, 0.14, 155, 7.0, 0.5, True, True, -1)
+    grow(trunk, 0.26, 175, 7.6, 1.3, True, True, 1)
+    grow(trunk, 0.39, 205, 8.2, 0.8, True, True, -1)
+    grow(trunk, 0.52, 240, 7.4, 1.9, True, True, 1)
+    grow(trunk, 0.65, 220, 6.6, 2.5, True, True, -1)
+    grow(trunk, 0.78, 175, 5.4, 0.4, True, True, 1)
     return limbs
 
 
@@ -411,7 +413,12 @@ def tangents_of(pos):
     return tangent
 
 
-def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift):
+def flow_wave(y, index):
+    """A bright band that steps downhill. The same height shares one wave, so forks split it."""
+    return float(np.sin((float(y) - index * 6.4) * 0.04))
+
+
+def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
     """A smooth limb. Shift moves the lit side toward the upper light."""
     left = []
     right = []
@@ -422,7 +429,8 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         width = start_w + (end_w - start_w) * ease
         if pinch and t > 0.7:
             width *= (1.0 - t) / 0.3
-        width *= 1 + 0.05 * np.sin(t * 7.5 + phase)
+        wave = flow_wave(pos[i, 1], index)
+        width *= 0.94 + 0.1 * max(0.0, wave) + 0.04 * np.sin(t * 5.0 + phase)
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -439,32 +447,64 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
     return np.array(left + right[::-1], np.int32)
 
 
+def flow_tongues(pos, progress, tangent, start_w, end_w, pinch, index):
+    """Short molten tongues. They ride the downhill wave and split with the branches."""
+    hot = [flow_wave(pos[i, 1], index) for i in range(len(pos))]
+    tongues = []
+    start = None
+    flags = [value > 0.12 for value in hot] + [False]
+    for i, flag in enumerate(flags):
+        if flag and start is None:
+            start = i
+        elif not flag and start is not None:
+            if i - start >= 2:
+                tongues.append(_tongue_poly(pos, tangent, progress, start_w, end_w, pinch, hot, start, i - 1))
+            start = None
+    return tongues
+
+
+def _tongue_poly(pos, tangent, progress, start_w, end_w, pinch, hot, i0, i1):
+    left = []
+    right = []
+    peak = max(hot[i0 : i1 + 1])
+    for i in range(i0, i1 + 1):
+        t = float(progress[i])
+        ease = t * t * (3 - 2 * t)
+        width = start_w + (end_w - start_w) * ease
+        if pinch and t > 0.7:
+            width *= (1.0 - t) / 0.3
+        bell = 0.0 if peak < 1e-4 else max(0.0, hot[i]) / peak
+        half = max(0.55, width * (0.48 + 0.46 * bell))
+        px = -float(tangent[i, 1])
+        py = float(tangent[i, 0])
+        left.append((pos[i, 0] + px * half, pos[i, 1] + py * half))
+        right.append((pos[i, 0] - px * half, pos[i, 1] - py * half))
+    return np.array(left + right[::-1], np.int32)
+
+
 def paint_channels(frame, index):
-    """Round downhill branches. Forks narrow, and the crown spreads to both sides."""
+    """Round downhill branches. Molten tongues run down the forks to both sides."""
     body = np.zeros(frame.shape[:2], np.uint8)
     lit = np.zeros(frame.shape[:2], np.uint8)
     glow = np.zeros(frame.shape[:2], np.uint8)
-    flow = index * 0.16
     for points, start_w, end_w, phase, pinch in lava_limbs(WIDTH, HEIGHT):
         pos, progress, _tangent = path_samples(points, 48)
         pos = meander(pos, index)
         tangent = tangents_of(pos)
-        limb = limb_strip(pos, progress, tangent, start_w, end_w, phase + flow, pinch, 1.0, 0.0)
-        shine = limb_strip(pos, progress, tangent, start_w, end_w, phase + flow, pinch, 0.62, 0.55)
+        limb = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 1.0, 0.0, index)
+        shine = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 0.62, 0.55, index)
         if limb is not None:
             cv2.fillPoly(body, [limb], 255)
         if shine is not None:
             cv2.fillPoly(lit, [shine], 255)
-        if start_w >= 8:
-            heart = limb_strip(pos, progress, tangent, start_w * 0.34, 0.8, phase + flow, True, 1.0, 0.2)
-            if heart is not None:
-                cv2.fillPoly(glow, [heart], 255)
+        for tongue in flow_tongues(pos, progress, tangent, start_w, end_w, pinch, index):
+            cv2.fillPoly(glow, [tongue], 255)
     cover = cv2.GaussianBlur(body, (5, 5), 1.05).astype(np.float32) / 255
     light = cv2.GaussianBlur(lit, (5, 5), 1.0).astype(np.float32) / 255
     heart = cv2.GaussianBlur(glow, (7, 7), 1.5).astype(np.float32) / 255
     cover = np.clip(cover, 0, 1)
     light = np.clip(light, 0, 1) * cover
-    heart = np.clip(heart, 0, 1) * light
+    heart = np.clip(heart, 0, 1) * cover
     crust = np.array([14, 32, 96], np.float32)
     mid = np.array([30, 128, 248], np.float32)
     core = np.array([115, 205, 255], np.float32)
