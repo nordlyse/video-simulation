@@ -1,6 +1,6 @@
 """Place the extracted person in a vector eruption.
 
-A ridged cone, darkened clouds, and lava that breaks as it runs downhill.
+A ridged cone, darkened clouds, and lava that forks downhill like branches.
 """
 
 from pathlib import Path
@@ -262,40 +262,26 @@ def add_fountain(frame, index):
             paint_chunk(frame, x, y, 8, (32, 120, 230), slot + side)
 
 
-def lava_channels(width, height):
-    """Channels leave the crater lip and only step downhill."""
-    return (
-        (
-            scale_points(width, height, ((0.52, 0.31), (0.49, 0.46), (0.44, 0.62), (0.36, 0.80), (0.28, 0.98))),
-            14,
-            38,
-            0.4,
-        ),
-        (
-            scale_points(width, height, ((0.53, 0.32), (0.51, 0.50), (0.48, 0.68), (0.44, 0.84), (0.40, 0.99))),
-            12,
-            32,
-            1.2,
-        ),
-        (
-            scale_points(width, height, ((0.50, 0.36), (0.40, 0.54), (0.30, 0.74), (0.18, 0.98))),
-            10,
-            28,
-            2.0,
-        ),
-        (
-            scale_points(width, height, ((0.47, 0.58), (0.36, 0.76), (0.26, 0.98))),
-            8,
-            22,
-            2.7,
-        ),
-        (
-            scale_points(width, height, ((0.54, 0.32), (0.58, 0.44), (0.63, 0.54), (0.68, 0.62))),
-            10,
-            26,
-            0.6,
-        ),
+def lava_limbs(width, height):
+    """A trunk that forks downhill. The crown spreads sideways and each tip narrows."""
+    raw = (
+        (((0.52, 0.33), (0.50, 0.42), (0.49, 0.52)), 16, 12, 0.3, False),
+        (((0.49, 0.52), (0.41, 0.64), (0.33, 0.76)), 10, 6, 1.1, False),
+        (((0.41, 0.64), (0.30, 0.76), (0.18, 0.90), (0.10, 0.99)), 5.5, 1.2, 2.2, True),
+        (((0.41, 0.64), (0.35, 0.78), (0.28, 0.94)), 4.4, 1.1, 1.7, True),
+        (((0.33, 0.76), (0.24, 0.88), (0.16, 0.99)), 4.6, 1.1, 2.8, True),
+        (((0.49, 0.52), (0.48, 0.66), (0.45, 0.80)), 9, 5, 0.5, False),
+        (((0.48, 0.66), (0.40, 0.78), (0.32, 0.94)), 4.2, 1.1, 1.6, True),
+        (((0.45, 0.80), (0.41, 0.90), (0.36, 0.99)), 4.4, 1.2, 0.9, True),
+        (((0.50, 0.42), (0.58, 0.52), (0.64, 0.62)), 9, 5.5, 0.8, False),
+        (((0.58, 0.52), (0.68, 0.64), (0.78, 0.78), (0.86, 0.92)), 5.0, 1.2, 1.4, True),
+        (((0.64, 0.62), (0.72, 0.74), (0.80, 0.88)), 4.2, 1.1, 2.4, True),
+        (((0.64, 0.62), (0.70, 0.74), (0.76, 0.88)), 3.6, 1.0, 3.1, True),
     )
+    return [
+        (scale_points(width, height, pairs), start_w, end_w, phase, tip)
+        for pairs, start_w, end_w, phase, tip in raw
+    ]
 
 
 def path_samples(points, count):
@@ -320,15 +306,17 @@ def path_samples(points, count):
     return pos, progress, tangent
 
 
-def meander(pos, phase):
-    """Bend the channel sideways. Y only increases, so the flow runs downhill."""
+def meander(pos, index):
+    """Bend every limb by the same sideways drift so forks stay joined. Y only increases."""
     out = pos.copy()
+    drift = index * 0.02
     for i in range(len(out)):
-        shift = np.sin(i * 0.42 + phase) * 7 + np.sin(i * 1.05 + phase * 1.2) * 3
+        y = float(out[i, 1])
+        shift = np.sin(y * 0.045 + drift) * 5 + np.sin(y * 0.095 + 1.1) * 2
         out[i, 0] += shift
     for i in range(1, len(out)):
-        if out[i, 1] < out[i - 1, 1] + 3:
-            out[i, 1] = out[i - 1, 1] + 3
+        if out[i, 1] < out[i - 1, 1] + 0.4:
+            out[i, 1] = out[i - 1, 1] + 0.4
     return out
 
 
@@ -343,44 +331,20 @@ def tangents_of(pos):
     return tangent
 
 
-def crust_slabs(pos, progress, tangent, start_w, end_w, index):
-    """Irregular crust chunks beside a molten lane that keeps running downhill."""
-    slabs = []
-    phase = index * 0.08
-    i = 1
-    while i < len(pos) - 2:
-        span = 2 + int((0.5 + 0.5 * np.sin(i * 0.85 + phase)) * 4)
-        j = min(i + span, len(pos) - 1)
-        side = 1.0 if np.sin(i * 1.37 + phase) > -0.1 else -1.0
-        cover = 0.34 + 0.22 * (0.5 + 0.5 * np.sin(i * 0.6 + phase))
-
-        def edge(k):
-            width = (start_w + (end_w - start_w) * float(progress[k])) * cover
-            nx, ny = -float(tangent[k, 1]), float(tangent[k, 0])
-            cx = pos[k, 0] + nx * width * 0.85 * side
-            cy = pos[k, 1] + ny * width * 0.85 * side
-            return (cx + nx * width, cy + ny * width), (cx - nx * width, cy - ny * width)
-
-        top_a, top_b = edge(i)
-        bot_a, bot_b = edge(j)
-        slabs.append(np.array([top_a, bot_a, bot_b, top_b], np.int32))
-        gap = 1 + int((0.5 + 0.5 * np.sin(i * 2.2 + phase)) * 2)
-        i = j + gap
-    return slabs
-
-
-def jagged_strip(pos, progress, tangent, start_w, end_w, phase, inner):
-    """Even width, a small torn edge, and a pointed end."""
+def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch):
+    """A lumpy limb that narrows toward the tip."""
     left = []
     right = []
     for i in range(len(pos)):
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
-        width = start_w + (end_w - start_w) * float(progress[i])
-        if inner:
-            width *= 0.46
-        jag = np.sin(i * 2.4 + phase) * 0.1 + np.sin(i * 5.2 + phase * 1.3) * 0.05
-        half = max(1.8, width * (1.0 + jag))
+        t = float(progress[i])
+        width = start_w + (end_w - start_w) * t
+        if pinch and t > 0.78:
+            width *= (1.0 - t) / 0.22
+        lump = 1 + 0.22 * np.sin(i * 0.62 + phase) * (1 - t * 0.65)
+        jag = np.sin(i * 2.8 + phase) * 0.07 + np.sin(i * 6.4 + phase * 1.3) * 0.035
+        half = max(0.7, width * lump * (1 + jag))
         left.append((pos[i, 0] + nx * half, pos[i, 1] + ny * half))
         right.append((pos[i, 0] - nx * half, pos[i, 1] - ny * half))
     if len(left) < 2:
@@ -388,42 +352,72 @@ def jagged_strip(pos, progress, tangent, start_w, end_w, phase, inner):
     return np.array(left + right[::-1], np.int32)
 
 
+def bark_chips(pos, progress, tangent, start_w, end_w, index):
+    """Short dark flakes along a limb."""
+    chips = []
+    phase = index * 0.08
+    i = 2
+    while i < len(pos) - 2:
+        t = float(progress[i])
+        width = start_w + (end_w - start_w) * t
+        if width < 3.2 or t > 0.9:
+            i += 2
+            continue
+        if np.sin(i * 1.3 + phase) < 0.05:
+            i += 2
+            continue
+        side = 1.0 if np.sin(i * 0.9 + phase) > 0 else -1.0
+        nx, ny = -float(tangent[i, 1]), float(tangent[i, 0])
+        tx, ty = float(tangent[i, 0]), float(tangent[i, 1])
+        reach = width * (0.55 + 0.15 * np.sin(i + phase))
+        along = 3 + width * 0.28
+        cx = pos[i, 0] + nx * reach * side
+        cy = pos[i, 1] + ny * reach * side
+        chips.append(
+            np.array(
+                [
+                    (cx - tx * along, cy - ty * along),
+                    (cx + tx * along * 0.35, cy + ty * along * 0.35),
+                    (cx + nx * width * 0.35 * side, cy + ny * width * 0.35 * side),
+                ],
+                np.int32,
+            )
+        )
+        i += 3 + int((0.5 + 0.5 * np.sin(i * 2.1 + phase)) * 3)
+    return chips
+
+
 def paint_channels(frame, index):
-    """Downhill channels. Crust plates ride on the molten core."""
-    crust_color = (14, 16, 42)
-    molten_color = (22, 96, 235)
-    toe_color = (36, 150, 255)
-    slab_color = (10, 12, 28)
+    """Forked downhill lava. Limbs narrow at the tips and spread to both sides."""
+    body_color = (16, 70, 200)
+    hot_color = (34, 150, 255)
+    crust_color = (10, 12, 26)
     heat = np.zeros(frame.shape[:2], np.float32)
-    banks = []
-    cores = []
-    toes = []
-    slabs = []
-    for points, start_w, end_w, phase in lava_channels(WIDTH, HEIGHT):
-        pos, progress, _tangent = path_samples(points, 48)
-        pos = meander(pos, phase + index * 0.025)
+    bodies = []
+    tips = []
+    chips = []
+    for points, start_w, end_w, phase, pinch in lava_limbs(WIDTH, HEIGHT):
+        pos, progress, _tangent = path_samples(points, 40)
+        pos = meander(pos, index)
         tangent = tangents_of(pos)
-        bank = jagged_strip(pos, progress, tangent, start_w, end_w, phase, False)
-        core = jagged_strip(pos, progress, tangent, start_w, end_w, phase, True)
-        if bank is not None:
-            banks.append(bank)
-        if core is not None:
-            cores.append(core)
-        cut = len(pos) // 2
-        toe = jagged_strip(pos[cut:], progress[cut:], tangent[cut:], start_w, end_w, phase, True)
-        if toe is not None:
-            toes.append(toe)
-        slabs.extend(crust_slabs(pos, progress, tangent, start_w, end_w, index))
-    if banks:
-        cv2.fillPoly(frame, banks, crust_color)
-    if cores:
-        cv2.fillPoly(frame, cores, molten_color)
-        cv2.fillPoly(heat, cores, 1)
-    if toes:
-        cv2.fillPoly(frame, toes, toe_color)
-    if slabs:
-        cv2.fillPoly(frame, slabs, slab_color)
-        cv2.fillPoly(heat, slabs, 0.12)
+        limb = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch)
+        if limb is not None:
+            bodies.append(limb)
+        if pinch:
+            cut = int(len(pos) * 0.62)
+            tip = limb_strip(pos[cut:], progress[cut:], tangent[cut:], start_w, end_w, phase, True)
+            if tip is not None:
+                tips.append(tip)
+        chips.extend(bark_chips(pos, progress, tangent, start_w, end_w, index))
+    if bodies:
+        cv2.fillPoly(frame, bodies, body_color)
+        cv2.fillPoly(heat, bodies, 0.55)
+    if tips:
+        cv2.fillPoly(frame, tips, hot_color)
+        cv2.fillPoly(heat, tips, 1)
+    if chips:
+        cv2.fillPoly(frame, chips, crust_color)
+        cv2.fillPoly(heat, chips, 0.1)
     fringe = cv2.GaussianBlur(heat, (5, 5), 1.1)
     fringe = np.clip(fringe - heat, 0, 1)
     warm = fringe[..., None] * np.array([10, 40, 90], np.float32)
