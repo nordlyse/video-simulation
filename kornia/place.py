@@ -158,7 +158,7 @@ def add_crater(frame, index):
 
 
 def add_clouds(frame, index):
-    """Soft cumulus banks. Bright tops, gray bases, slow drift."""
+    """Soft cumulus banks. They drift from right to left and repeat."""
     color = np.zeros_like(frame, np.float32)
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     banks = (
@@ -168,9 +168,10 @@ def add_clouds(frame, index):
         (250, 150, 0.6),
         (640, 158, 1.7),
     )
-    for step, (cx, cy, phase) in enumerate(banks):
-        drift = index * (0.28 + (step % 3) * 0.05)
-        ox = (cx + drift) % (WIDTH + 240) - 80
+    span = WIDTH + 320
+    speed = span / FRAMES
+    for cx, cy, phase in banks:
+        ox = (cx + 140 - index * speed) % span - 140
         for puff in range(7):
             px = int(ox + (puff - 3) * 46 + np.sin(phase + puff) * 6)
             py = int(cy + 12)
@@ -305,15 +306,28 @@ def add_fountain(frame, index):
         stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
     drops = np.zeros(frame.shape[:2], np.float32)
     heads = np.zeros(frame.shape[:2], np.float32)
-    for side in (-1.0, 1.0):
-        for slot in range(6):
-            fall = (slot * 18 + index * 1.15) % 120
-            x = cx + side * (98 + fall * 0.22)
-            y = cap_y + 20 + 0.012 * fall * fall + slot * 3
-            if y > cy + 150:
+    # aim is left (-1) to right (1). The side curtains stay, and other spouts wander.
+    spouts = (
+        (-1.0, 8, 0.22, 0.2, 5),
+        (1.0, 8, 0.22, 1.3, 5),
+        (-0.58, 20, 0.12, 2.5, 4),
+        (0.64, 18, 0.11, 0.8, 4),
+        (-1.38, 2, 0.16, 3.3, 3),
+        (1.42, 0, 0.15, 1.9, 3),
+        (-0.24, 28, 0.07, 4.2, 3),
+        (0.28, 26, 0.06, 2.7, 3),
+    )
+    for base_aim, lip, outward, phase, count in spouts:
+        wander = 0.16 if abs(base_aim) > 0.9 else 0.38
+        aim = base_aim + np.sin(index * 0.12 + phase) * wander
+        for slot in range(count):
+            fall = (slot * 20 + index * 1.15 + phase * 13) % 125
+            x = cx + aim * (90 + lip * 0.35) + aim * fall * outward
+            y = cap_y + lip + 0.011 * fall * fall + slot * 2
+            if y > cy + 155 or not (24 < x < WIDTH - 24):
                 continue
-            length = 12 + fall * 0.08 + 2.5 * abs(np.sin(slot * 1.7))
-            stamp_drop(drops, x, y, length, -side * (4 + fall * 0.035), 0.95)
+            length = 12 + fall * 0.075 + 2.4 * abs(np.sin(slot * 1.7 + phase))
+            stamp_drop(drops, x, y, length, -aim * (4 + fall * 0.03), 0.95)
             cv2.ellipse(
                 heads,
                 (int(round(x)), int(round(y))),
