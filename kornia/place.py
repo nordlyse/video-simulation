@@ -215,31 +215,20 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
-def stamp_drop(mask, x, y, length, lean, amount):
-    """A falling drop. The tail points up and the head stays rounded."""
-    if length < 4:
-        return
-    head = max(2.4, min(7.2, length * 0.30))
-    tail_x = x + lean
-    tail_y = y - length
-    pts = [(tail_x, tail_y)]
-    for step in range(1, 8):
-        t = step / 8
-        wide = head * (t ** 1.2)
-        px = tail_x + (x - tail_x) * t
-        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
-        pts.append((px + wide, py))
-    for step in range(1, 8):
-        ang = step / 7 * np.pi
-        pts.append((x + np.cos(ang) * head * 0.86, y + np.sin(ang) * head * 0.7))
-    for step in range(7, 0, -1):
-        t = step / 8
-        wide = head * (t ** 1.2)
-        px = tail_x + (x - tail_x) * t
-        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
-        pts.append((px - wide, py))
-    contour = np.array([(int(round(px)), int(round(py))) for px, py in pts], np.int32)
-    cv2.fillPoly(mask, [contour], float(amount))
+def cone_lip(x):
+    """The cone surface under x. Pieces land here and then slide."""
+    apex_x, apex_y = APEX
+    span = BASE_Y - apex_y
+    for y in range(int(apex_y), int(BASE_Y)):
+        tt = min((y - apex_y) / span, 1.0)
+        half = 78 + 360 * (tt ** 1.12)
+        skirt = max(0.0, (tt - 0.7) / 0.3)
+        half += min(skirt, 1.0) ** 2 * 120
+        jag = 1 + 0.02 * np.sin(y * 0.05 + 0.4) + 0.012 * np.sin(y * 0.13)
+        center = apex_x - tt * 18 + np.sin(tt * 3.1) * 6
+        if abs(x - center) <= half * jag:
+            return float(y)
+    return BASE_Y
 
 
 def stamp_lobe(mask, x, y, radius, salt, amount):
@@ -263,7 +252,7 @@ def stamp_lobe(mask, x, y, radius, salt, amount):
 
 
 def add_fountain(frame, index):
-    """Ragged molten lava rises into a lumpy crown. Pieces spill off its edge."""
+    """Ragged molten lava rises into a lumpy crown. Scattered pieces fall, slide, and fade."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
@@ -308,36 +297,79 @@ def add_fountain(frame, index):
         stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
     drops = np.zeros(frame.shape[:2], np.float32)
     heads = np.zeros(frame.shape[:2], np.float32)
-    # aim is left (-1) to right (1). The side curtains stay, and other spouts wander.
-    spouts = (
-        (-1.0, 8, 0.22, 0.2, 5),
-        (1.0, 8, 0.22, 1.3, 5),
-        (-0.58, 20, 0.12, 2.5, 4),
-        (0.64, 18, 0.11, 0.8, 4),
-        (-1.38, 2, 0.16, 3.3, 3),
-        (1.42, 0, 0.15, 1.9, 3),
-        (-0.24, 28, 0.07, 4.2, 3),
-        (0.28, 26, 0.06, 2.7, 3),
-    )
-    for base_aim, lip, outward, phase, count in spouts:
-        wander = 0.16 if abs(base_aim) > 0.9 else 0.38
-        aim = base_aim + np.sin(index * 0.12 + phase) * wander
-        for slot in range(count):
-            fall = (slot * 20 + index * 1.15 + phase * 13) % 125
-            x = cx + aim * (90 + lip * 0.35) + aim * fall * outward
-            y = cap_y + lip + 0.011 * fall * fall + slot * 2
-            if y > cy + 155 or not (24 < x < WIDTH - 24):
-                continue
-            length = 12 + fall * 0.075 + 2.4 * abs(np.sin(slot * 1.7 + phase))
-            stamp_drop(drops, x, y, length, -aim * (4 + fall * 0.03), 0.95)
+    for n in range(15):
+        phase = n * 2.399
+        aim = np.sin(phase * 1.7)
+        reach = 26 + 84 * abs(np.sin(phase * 0.8))
+        start_x = cx + aim * reach
+        start_y = cap_y + 6 + (n * 17 % 34)
+        drift = np.cos(phase * 2.1) * 34
+        fall_px = 150 + 100 * abs(aim)
+        fall_len = 36 + (n * 5 % 18)
+        slide_len = 84 + (n * 7 % 16)
+        life = (index * 0.9 + n * 11.0) % (fall_len + slide_len)
+        land_x = land_y = None
+        hit = fall_len
+        for step in range(1, 9):
+            t = step / 8
+            px = start_x + drift * t
+            py = start_y + fall_px * (t ** 1.65)
+            if py >= cone_lip(px):
+                land_x, land_y = px, py
+                hit = t * fall_len
+                break
+        if land_x is None:
+            continue
+        if life < hit:
+            u = life / max(hit, 1)
+            x = start_x + (land_x - start_x) * u
+            y = start_y + (land_y - start_y) * (u ** 1.35)
+            salt = phase
+            size = 5.2 + 2.4 * abs(np.sin(phase * 1.4))
+            stamp_lobe(drops, x, y, size, salt, 0.9)
+            stamp_lobe(drops, x + np.cos(salt) * 3.4, y + np.sin(salt) * 2.0, size * 0.48, salt + 0.7, 0.62)
             cv2.ellipse(
                 heads,
                 (int(round(x)), int(round(y))),
-                (max(2, int(length * 0.16)), max(2, int(length * 0.14))),
+                (max(2, int(size * 0.34)), max(2, int(size * 0.28))),
                 0,
                 0,
                 360,
-                0.9,
+                0.85,
+                -1,
+            )
+            continue
+        slide_u = (life - hit) / slide_len
+        if slide_u >= 1:
+            continue
+        fade = 1.0 if slide_u < 0.58 else ((1 - slide_u) / 0.42) ** 1.15
+        side = np.sign(land_x - APEX[0])
+        if abs(land_x - APEX[0]) < 36:
+            side = 1.0 if aim >= 0 else -1.0
+        run = (BASE_Y - 18 - land_y) * 0.82
+        sx = land_x + side * slide_u * run * 0.62
+        sy = land_y + slide_u * run
+        sy = max(sy, cone_lip(sx) + 4)
+        if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
+            continue
+        for k in range(4):
+            stamp_lobe(
+                drops,
+                sx - side * 7.0 * k,
+                sy - 5.2 * k,
+                max(2.4, 7.2 - k * 1.4),
+                phase + k * 0.4,
+                fade * (0.9 - 0.16 * k),
+            )
+        if fade > 0.45:
+            cv2.ellipse(
+                heads,
+                (int(round(sx)), int(round(sy))),
+                (3, 2),
+                0,
+                0,
+                360,
+                0.55 * fade,
                 -1,
             )
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
