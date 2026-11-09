@@ -169,7 +169,8 @@ def add_clouds(frame, index):
         (640, 158, 1.7),
     )
     span = WIDTH + 320
-    speed = span / FRAMES
+    # One eighth of a pass per clip, so the drift stays smooth behind the lava.
+    speed = span / (FRAMES * 8)
     for cx, cy, phase in banks:
         ox = (cx + 140 - index * speed) % span - 140
         for puff in range(7):
@@ -186,7 +187,8 @@ def add_clouds(frame, index):
             cv2.circle(cover, (px, py), radius, 0.66, -1)
     color = cv2.GaussianBlur(color, (51, 51), 16)
     cover = cv2.GaussianBlur(cover, (51, 51), 16)
-    sky = frame[:, :, 0].astype(np.float32) > frame[:, :, 2].astype(np.float32) + 6
+    sky = (frame[:, :, 0].astype(np.float32) - frame[:, :, 2].astype(np.float32) - 6) / 18.0
+    sky = cv2.GaussianBlur(np.clip(sky, 0, 1), (5, 5), 1.2)
     alpha = np.clip(cover, 0, 0.78) * sky
     alpha = alpha[..., None]
     base = frame.astype(np.float32)
@@ -343,6 +345,8 @@ def add_fountain(frame, index):
     drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
     drop_heart = cv2.GaussianBlur(heads, (5, 5), 1.05)
     cover = np.clip(np.maximum(soft * 1.45, drop_cover * 1.35), 0, 1)
+    # A dense body hides the clouds, so the lava does not break into blocks.
+    cover = np.maximum(cover, np.clip((cover - 0.42) / 0.28, 0, 1))
     heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
     heart = np.clip(heart + drop_heart * 0.9, 0, 1)
     crust = np.array([14, 58, 150], np.float32)
