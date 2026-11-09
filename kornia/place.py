@@ -158,7 +158,7 @@ def add_crater(frame, index):
 
 
 def add_clouds(frame, index):
-    """Soft cumulus banks. Bright tops, gray bases, slow drift."""
+    """Soft cumulus banks. They drift from right to left and repeat."""
     color = np.zeros_like(frame, np.float32)
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     banks = (
@@ -168,9 +168,11 @@ def add_clouds(frame, index):
         (250, 150, 0.6),
         (640, 158, 1.7),
     )
-    for step, (cx, cy, phase) in enumerate(banks):
-        drift = index * (0.28 + (step % 3) * 0.05)
-        ox = (cx + drift) % (WIDTH + 240) - 80
+    span = WIDTH + 320
+    # One eighth of a pass per clip, so the drift stays smooth behind the lava.
+    speed = span / (FRAMES * 8)
+    for cx, cy, phase in banks:
+        ox = (cx + 140 - index * speed) % span - 140
         for puff in range(7):
             px = int(ox + (puff - 3) * 46 + np.sin(phase + puff) * 6)
             py = int(cy + 12)
@@ -185,7 +187,8 @@ def add_clouds(frame, index):
             cv2.circle(cover, (px, py), radius, 0.66, -1)
     color = cv2.GaussianBlur(color, (51, 51), 16)
     cover = cv2.GaussianBlur(cover, (51, 51), 16)
-    sky = frame[:, :, 0].astype(np.float32) > frame[:, :, 2].astype(np.float32) + 6
+    sky = (frame[:, :, 0].astype(np.float32) - frame[:, :, 2].astype(np.float32) - 6) / 18.0
+    sky = cv2.GaussianBlur(np.clip(sky, 0, 1), (5, 5), 1.2)
     alpha = np.clip(cover, 0, 0.78) * sky
     alpha = alpha[..., None]
     base = frame.astype(np.float32)
@@ -212,30 +215,56 @@ def add_plume(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
 
 
-def stamp_drop(mask, x, y, length, lean, amount):
-    """A falling drop. The tail points up and the head stays rounded."""
-    if length < 4:
+def cone_lip(x):
+    """The cone surface under x. Pieces land here and then slide."""
+    apex_x, apex_y = APEX
+    span = BASE_Y - apex_y
+    for y in range(int(apex_y), int(BASE_Y)):
+        tt = min((y - apex_y) / span, 1.0)
+        half = 78 + 360 * (tt ** 1.12)
+        skirt = max(0.0, (tt - 0.7) / 0.3)
+        half += min(skirt, 1.0) ** 2 * 120
+        jag = 1 + 0.02 * np.sin(y * 0.05 + 0.4) + 0.012 * np.sin(y * 0.13)
+        center = apex_x - tt * 18 + np.sin(tt * 3.1) * 6
+        if abs(x - center) <= half * jag:
+            return float(y)
+    return BASE_Y
+
+
+def stamp_rain(mask, x, y, length, back_x, back_y, amount):
+    """A raindrop. The point faces back along the path and the head stays rounded."""
+    if length < 4 or amount <= 0:
         return
-    head = max(2.4, min(7.2, length * 0.30))
-    tail_x = x + lean
-    tail_y = y - length
+    norm = float(np.hypot(back_x, back_y))
+    if norm < 1e-3:
+        bx, by = 0.0, -1.0
+    else:
+        bx, by = back_x / norm, back_y / norm
+    px, py = -by, bx
+    head = max(2.3, min(length * 0.34, 8.5))
+    tail_x = x + bx * length
+    tail_y = y + by * length
+    fx, fy = -bx, -by
     pts = [(tail_x, tail_y)]
     for step in range(1, 8):
         t = step / 8
-        wide = head * (t ** 1.2)
-        px = tail_x + (x - tail_x) * t
-        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
-        pts.append((px + wide, py))
+        wide = head * (t ** 1.15)
+        mx = tail_x + (x - tail_x) * t
+        my = tail_y + (y - tail_y) * t
+        pts.append((mx + px * wide, my + py * wide))
     for step in range(1, 8):
         ang = step / 7 * np.pi
-        pts.append((x + np.cos(ang) * head * 0.86, y + np.sin(ang) * head * 0.7))
+        pts.append((
+            x + np.cos(ang) * px * head * 0.9 + np.sin(ang) * fx * head * 0.72,
+            y + np.cos(ang) * py * head * 0.9 + np.sin(ang) * fy * head * 0.72,
+        ))
     for step in range(7, 0, -1):
         t = step / 8
-        wide = head * (t ** 1.2)
-        px = tail_x + (x - tail_x) * t
-        py = tail_y + (y - tail_y) * (t ** 0.9) + head * 0.28 * t
-        pts.append((px - wide, py))
-    contour = np.array([(int(round(px)), int(round(py))) for px, py in pts], np.int32)
+        wide = head * (t ** 1.15)
+        mx = tail_x + (x - tail_x) * t
+        my = tail_y + (y - tail_y) * t
+        pts.append((mx - px * wide, my - py * wide))
+    contour = np.array([(int(round(a)), int(round(b))) for a, b in pts], np.int32)
     cv2.fillPoly(mask, [contour], float(amount))
 
 
@@ -260,7 +289,7 @@ def stamp_lobe(mask, x, y, radius, salt, amount):
 
 
 def add_fountain(frame, index):
-    """Ragged molten lava rises into a lumpy crown. Pieces spill off its edge."""
+    """Ragged molten lava rises into a lumpy crown. Scattered pieces fall, slide, and fade."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
@@ -305,30 +334,100 @@ def add_fountain(frame, index):
         stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
     drops = np.zeros(frame.shape[:2], np.float32)
     heads = np.zeros(frame.shape[:2], np.float32)
-    for side in (-1.0, 1.0):
-        for slot in range(6):
-            fall = (slot * 18 + index * 1.15) % 120
-            x = cx + side * (98 + fall * 0.22)
-            y = cap_y + 20 + 0.012 * fall * fall + slot * 3
-            if y > cy + 150:
-                continue
-            length = 12 + fall * 0.08 + 2.5 * abs(np.sin(slot * 1.7))
-            stamp_drop(drops, x, y, length, -side * (4 + fall * 0.035), 0.95)
+    for n in range(15):
+        phase = n * 2.399
+        aim = np.sin(phase * 1.7)
+        reach = 26 + 84 * abs(np.sin(phase * 0.8))
+        start_x = cx + aim * reach
+        start_y = cap_y + 6 + (n * 17 % 34)
+        drift = np.cos(phase * 2.1) * 34
+        fall_px = 150 + 100 * abs(aim)
+        fall_len = 36 + (n * 5 % 18)
+        slide_len = 84 + (n * 7 % 16)
+        trail_len = 46
+        life = (index * 0.9 + n * 11.0) % (fall_len + slide_len + trail_len)
+        land_x = land_y = None
+        hit = fall_len
+        for step in range(1, 9):
+            t = step / 8
+            px = start_x + drift * t
+            py = start_y + fall_px * (t ** 1.65)
+            if py >= cone_lip(px):
+                land_x, land_y = px, py
+                hit = t * fall_len
+                break
+        if land_x is None:
+            continue
+        if life < hit:
+            u = life / max(hit, 1)
+            x = start_x + (land_x - start_x) * u
+            y = start_y + (land_y - start_y) * (u ** 1.35)
+            length = (10.4 + 2.6 * abs(np.sin(phase * 1.4))) * 1.35
+            stamp_rain(drops, x, y, length, start_x - x, start_y - y, 0.9)
             cv2.ellipse(
                 heads,
                 (int(round(x)), int(round(y))),
-                (max(2, int(length * 0.16)), max(2, int(length * 0.14))),
+                (max(2, int(length * 0.16)), max(2, int(length * 0.13))),
                 0,
                 0,
                 360,
-                0.9,
+                0.85,
                 -1,
             )
+            continue
+        if life < hit + slide_len:
+            slide_u = (life - hit) / slide_len
+            trail_fade = 1.0
+            head_fade = 1.0
+        else:
+            slide_u = 1.0
+            trail_u = (life - hit - slide_len) / trail_len
+            if trail_u >= 1:
+                continue
+            trail_fade = 1 - trail_u
+            head_fade = max(0.0, 1 - trail_u / 0.28)
+        side = np.sign(land_x - APEX[0])
+        if abs(land_x - APEX[0]) < 36:
+            side = 1.0 if aim >= 0 else -1.0
+        run = (BASE_Y - 18 - land_y) * 0.82
+
+        def slope_at(frac):
+            sx = land_x + side * frac * run * 0.62
+            sy = max(land_y + frac * run, cone_lip(sx) + 4)
+            return sx, sy
+
+        for mark in range(7):
+            frac = slide_u * mark / 7
+            sx, sy = slope_at(frac)
+            if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
+                continue
+            behind = 1 - mark / 7
+            length = (3.4 + 5.6 * (1 - behind) ** 1.5) * 1.35
+            amount = 0.32 * (0.25 + 0.75 * (1 - behind)) * trail_fade
+            if amount < 0.04:
+                continue
+            stamp_rain(drops, sx, sy, length, -side * 0.62, -1.0, amount)
+        if head_fade > 0.04:
+            sx, sy = slope_at(slide_u)
+            if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
+                stamp_rain(drops, sx, sy, 16.8, -side * 0.62, -1.0, 0.9 * head_fade)
+                cv2.ellipse(
+                    heads,
+                    (int(round(sx)), int(round(sy))),
+                    (4, 3),
+                    0,
+                    0,
+                    360,
+                    0.7 * head_fade,
+                    -1,
+                )
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
     core = cv2.GaussianBlur(mask, (21, 21), 5.5)
     drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
     drop_heart = cv2.GaussianBlur(heads, (5, 5), 1.05)
     cover = np.clip(np.maximum(soft * 1.45, drop_cover * 1.35), 0, 1)
+    # A dense body hides the clouds, so the lava does not break into blocks.
+    cover = np.maximum(cover, np.clip((cover - 0.42) / 0.28, 0, 1))
     heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
     heart = np.clip(heart + drop_heart * 0.9, 0, 1)
     crust = np.array([14, 58, 150], np.float32)
