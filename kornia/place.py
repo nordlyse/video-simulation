@@ -231,6 +231,43 @@ def cone_lip(x):
     return BASE_Y
 
 
+def stamp_rain(mask, x, y, length, back_x, back_y, amount):
+    """A raindrop. The point faces back along the path and the head stays rounded."""
+    if length < 4 or amount <= 0:
+        return
+    norm = float(np.hypot(back_x, back_y))
+    if norm < 1e-3:
+        bx, by = 0.0, -1.0
+    else:
+        bx, by = back_x / norm, back_y / norm
+    px, py = -by, bx
+    head = max(2.3, min(length * 0.34, 8.5))
+    tail_x = x + bx * length
+    tail_y = y + by * length
+    fx, fy = -bx, -by
+    pts = [(tail_x, tail_y)]
+    for step in range(1, 8):
+        t = step / 8
+        wide = head * (t ** 1.15)
+        mx = tail_x + (x - tail_x) * t
+        my = tail_y + (y - tail_y) * t
+        pts.append((mx + px * wide, my + py * wide))
+    for step in range(1, 8):
+        ang = step / 7 * np.pi
+        pts.append((
+            x + np.cos(ang) * px * head * 0.9 + np.sin(ang) * fx * head * 0.72,
+            y + np.cos(ang) * py * head * 0.9 + np.sin(ang) * fy * head * 0.72,
+        ))
+    for step in range(7, 0, -1):
+        t = step / 8
+        wide = head * (t ** 1.15)
+        mx = tail_x + (x - tail_x) * t
+        my = tail_y + (y - tail_y) * t
+        pts.append((mx - px * wide, my - py * wide))
+    contour = np.array([(int(round(a)), int(round(b))) for a, b in pts], np.int32)
+    cv2.fillPoly(mask, [contour], float(amount))
+
+
 def stamp_lobe(mask, x, y, radius, salt, amount):
     """A stretched lobe. Neighbors melt together after the shared blur."""
     if radius < 1:
@@ -325,14 +362,12 @@ def add_fountain(frame, index):
             u = life / max(hit, 1)
             x = start_x + (land_x - start_x) * u
             y = start_y + (land_y - start_y) * (u ** 1.35)
-            salt = phase
-            size = 5.2 + 2.4 * abs(np.sin(phase * 1.4))
-            stamp_lobe(drops, x, y, size, salt, 0.9)
-            stamp_lobe(drops, x + np.cos(salt) * 3.4, y + np.sin(salt) * 2.0, size * 0.48, salt + 0.7, 0.62)
+            length = (10.4 + 2.6 * abs(np.sin(phase * 1.4))) * 1.35
+            stamp_rain(drops, x, y, length, start_x - x, start_y - y, 0.9)
             cv2.ellipse(
                 heads,
                 (int(round(x)), int(round(y))),
-                (max(2, int(size * 0.34)), max(2, int(size * 0.28))),
+                (max(2, int(length * 0.16)), max(2, int(length * 0.13))),
                 0,
                 0,
                 360,
@@ -367,19 +402,19 @@ def add_fountain(frame, index):
             if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
                 continue
             behind = 1 - mark / 7
-            size = 1.7 + 3.4 * (1 - behind) ** 1.5
+            length = (3.4 + 5.6 * (1 - behind) ** 1.5) * 1.35
             amount = 0.32 * (0.25 + 0.75 * (1 - behind)) * trail_fade
             if amount < 0.04:
                 continue
-            stamp_lobe(drops, sx, sy, size, phase + mark * 0.35, amount)
+            stamp_rain(drops, sx, sy, length, -side * 0.62, -1.0, amount)
         if head_fade > 0.04:
             sx, sy = slope_at(slide_u)
             if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
-                stamp_lobe(drops, sx, sy, 7.2, phase, 0.9 * head_fade)
+                stamp_rain(drops, sx, sy, 16.8, -side * 0.62, -1.0, 0.9 * head_fade)
                 cv2.ellipse(
                     heads,
                     (int(round(sx)), int(round(sy))),
-                    (3, 2),
+                    (4, 3),
                     0,
                     0,
                     360,
