@@ -307,7 +307,8 @@ def add_fountain(frame, index):
         fall_px = 150 + 100 * abs(aim)
         fall_len = 36 + (n * 5 % 18)
         slide_len = 84 + (n * 7 % 16)
-        life = (index * 0.9 + n * 11.0) % (fall_len + slide_len)
+        trail_len = 46
+        life = (index * 0.9 + n * 11.0) % (fall_len + slide_len + trail_len)
         land_x = land_y = None
         hit = fall_len
         for step in range(1, 9):
@@ -339,39 +340,52 @@ def add_fountain(frame, index):
                 -1,
             )
             continue
-        slide_u = (life - hit) / slide_len
-        if slide_u >= 1:
-            continue
-        fade = 1.0 if slide_u < 0.58 else ((1 - slide_u) / 0.42) ** 1.15
+        if life < hit + slide_len:
+            slide_u = (life - hit) / slide_len
+            trail_fade = 1.0
+            head_fade = 1.0
+        else:
+            slide_u = 1.0
+            trail_u = (life - hit - slide_len) / trail_len
+            if trail_u >= 1:
+                continue
+            trail_fade = 1 - trail_u
+            head_fade = max(0.0, 1 - trail_u / 0.28)
         side = np.sign(land_x - APEX[0])
         if abs(land_x - APEX[0]) < 36:
             side = 1.0 if aim >= 0 else -1.0
         run = (BASE_Y - 18 - land_y) * 0.82
-        sx = land_x + side * slide_u * run * 0.62
-        sy = land_y + slide_u * run
-        sy = max(sy, cone_lip(sx) + 4)
-        if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
-            continue
-        for k in range(4):
-            stamp_lobe(
-                drops,
-                sx - side * 7.0 * k,
-                sy - 5.2 * k,
-                max(2.4, 7.2 - k * 1.4),
-                phase + k * 0.4,
-                fade * (0.9 - 0.16 * k),
-            )
-        if fade > 0.45:
-            cv2.ellipse(
-                heads,
-                (int(round(sx)), int(round(sy))),
-                (3, 2),
-                0,
-                0,
-                360,
-                0.55 * fade,
-                -1,
-            )
+
+        def slope_at(frac):
+            sx = land_x + side * frac * run * 0.62
+            sy = max(land_y + frac * run, cone_lip(sx) + 4)
+            return sx, sy
+
+        for mark in range(7):
+            frac = slide_u * mark / 7
+            sx, sy = slope_at(frac)
+            if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
+                continue
+            behind = 1 - mark / 7
+            size = 1.7 + 3.4 * (1 - behind) ** 1.5
+            amount = 0.32 * (0.25 + 0.75 * (1 - behind)) * trail_fade
+            if amount < 0.04:
+                continue
+            stamp_lobe(drops, sx, sy, size, phase + mark * 0.35, amount)
+        if head_fade > 0.04:
+            sx, sy = slope_at(slide_u)
+            if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
+                stamp_lobe(drops, sx, sy, 7.2, phase, 0.9 * head_fade)
+                cv2.ellipse(
+                    heads,
+                    (int(round(sx)), int(round(sy))),
+                    (3, 2),
+                    0,
+                    0,
+                    360,
+                    0.7 * head_fade,
+                    -1,
+                )
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
     core = cv2.GaussianBlur(mask, (21, 21), 5.5)
     drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
