@@ -77,18 +77,27 @@ def build_backdrop(grain):
     sky = sky * (1 - horizon[..., None] * 0.72) + haze * (horizon[..., None] * 0.72)
     frame = sky.copy()
 
-    def lay_ridge(base, amp, color, cover):
+    def lay_ridge(base, amp, color, cover, soften):
+        """A distant ridge. The skyline reads, and the edge stays hazy."""
+        span = np.arange(WIDTH, dtype=np.float32)
         peaks = (
             base
-            + amp * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.012 + base * 0.01)
-            + amp * 0.4 * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.029 + 1.4)
+            + amp * np.sin(span * 0.012 + base * 0.01)
+            + amp * 0.55 * np.sin(span * 0.031 + 1.4)
+            + amp * 0.22 * np.sin(span * 0.068 + 0.6)
         )
-        mask = yy > peaks[None, :]
-        tone = color * (0.9 + 0.16 * grain)[..., None]
-        frame[mask] = frame[mask] * (1 - cover) + tone[mask] * cover
+        depth = yy - peaks[None, :]
+        mask = np.clip(depth / soften, 0, 1)
+        mask = cv2.GaussianBlur(mask, (0, 0), 2.2)
+        crest = np.exp(-np.clip(depth, 0, None) / (soften * 0.9)) * mask
+        lit = np.minimum(color + np.array([22, 18, 14], np.float32), 176)
+        tone = color * (0.92 + 0.12 * grain)[..., None]
+        tone = tone * (1 - crest[..., None] * 0.28) + lit * (crest[..., None] * 0.28)
+        alpha = (mask * cover)[..., None]
+        frame[:] = frame * (1 - alpha) + tone * alpha
 
-    lay_ridge(292, 34, np.array([96, 90, 84], np.float32), 0.55)
-    lay_ridge(338, 22, np.array([62, 60, 58], np.float32), 0.82)
+    lay_ridge(286, 42, np.array([102, 98, 94], np.float32), 0.7, 26)
+    lay_ridge(334, 30, np.array([70, 68, 66], np.float32), 0.78, 16)
 
     apex_x, apex_y = APEX
     span = BASE_Y - apex_y
