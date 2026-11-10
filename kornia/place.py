@@ -123,6 +123,12 @@ def build_backdrop(grain):
     rock *= (0.78 + 0.36 * gullies)[..., None]
     limb = np.clip((np.abs(flank) - 0.9) / 0.1, 0, 1)
     rock *= (1 - limb * 0.18)[..., None]
+    # The middle of the face comes forward. The outer flanks stay put.
+    belly = np.exp(-0.5 * ((tt - 0.46) / 0.32) ** 2)
+    bulge = np.exp(-0.5 * (flank / 0.30) ** 2) * belly
+    shoulder = np.exp(-0.5 * ((np.abs(flank) - 0.42) / 0.11) ** 2) * belly
+    rock *= (1 + bulge * 0.28)[..., None]
+    rock *= (1 - shoulder * 0.2)[..., None]
     trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
     rock *= (1 - trough * 0.28)[..., None]
     for base_x, amount in ((80, 0.28), (220, -0.18), (360, 0.22), (620, 0.24), (760, -0.16), (900, 0.2)):
