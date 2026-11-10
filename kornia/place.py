@@ -77,18 +77,27 @@ def build_backdrop(grain):
     sky = sky * (1 - horizon[..., None] * 0.72) + haze * (horizon[..., None] * 0.72)
     frame = sky.copy()
 
-    def lay_ridge(base, amp, color, cover):
+    def lay_ridge(base, amp, color, cover, soften):
+        """A distant ridge. The skyline reads, and the edge stays hazy."""
+        span = np.arange(WIDTH, dtype=np.float32)
         peaks = (
             base
-            + amp * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.012 + base * 0.01)
-            + amp * 0.4 * np.sin(np.arange(WIDTH, dtype=np.float32) * 0.029 + 1.4)
+            + amp * np.sin(span * 0.012 + base * 0.01)
+            + amp * 0.55 * np.sin(span * 0.031 + 1.4)
+            + amp * 0.22 * np.sin(span * 0.068 + 0.6)
         )
-        mask = yy > peaks[None, :]
-        tone = color * (0.9 + 0.16 * grain)[..., None]
-        frame[mask] = frame[mask] * (1 - cover) + tone[mask] * cover
+        depth = yy - peaks[None, :]
+        mask = np.clip(depth / soften, 0, 1)
+        mask = cv2.GaussianBlur(mask, (0, 0), 1.0)
+        crest = np.exp(-np.clip(depth, 0, None) / (soften * 0.65)) * mask
+        lit = np.minimum(color + np.array([48, 40, 32], np.float32), 200)
+        tone = color * (0.94 + 0.1 * grain)[..., None]
+        tone = tone * (1 - crest[..., None] * 0.72) + lit * (crest[..., None] * 0.72)
+        alpha = (mask * cover)[..., None]
+        frame[:] = frame * (1 - alpha) + tone * alpha
 
-    lay_ridge(292, 34, np.array([96, 90, 84], np.float32), 0.55)
-    lay_ridge(338, 22, np.array([62, 60, 58], np.float32), 0.82)
+    lay_ridge(232, 68, np.array([58, 54, 50], np.float32), 0.97, 8)
+    lay_ridge(292, 48, np.array([32, 30, 28], np.float32), 0.98, 6)
 
     apex_x, apex_y = APEX
     span = BASE_Y - apex_y
@@ -104,16 +113,17 @@ def build_backdrop(grain):
     cone = (t >= 0) & (t <= 1.04) & (np.abs(flank) <= 1) & (yy < HEIGHT - 8)
 
     facing = np.sqrt(np.clip(1 - np.clip(flank, -1, 1) ** 2, 0, 1))
-    light = np.clip(flank * 0.42 + facing * 0.9, 0, 1)
+    # The front of the cone is bright. The flanks turn away and go dark.
+    light = np.clip(facing ** 0.62 * 0.8 + np.clip(0.36 - flank * 1.05, 0, 1) * 0.42, 0, 1)
     narrow = cv2.resize(grain, (WIDTH // 7, HEIGHT), interpolation=cv2.INTER_AREA)
     gullies = cv2.resize(narrow, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
     gullies = cv2.GaussianBlur(gullies, (9, 9), 0)
-    shadow = np.array([26, 24, 30], np.float32)
-    lit = np.array([64, 74, 104], np.float32)
+    shadow = np.array([6, 5, 8], np.float32)
+    lit = np.array([92, 108, 150], np.float32)
     rock = shadow * (1 - light[..., None]) + lit * light[..., None]
     rock *= (0.78 + 0.36 * gullies)[..., None]
-    limb = np.clip((np.abs(flank) - 0.9) / 0.1, 0, 1)
-    rock *= (1 - limb * 0.18)[..., None]
+    limb = np.clip((np.abs(flank) - 0.55) / 0.45, 0, 1)
+    rock *= (1 - limb * 0.58)[..., None]
     trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
     rock *= (1 - trough * 0.28)[..., None]
     for base_x, amount in ((80, 0.28), (220, -0.18), (360, 0.22), (620, 0.24), (760, -0.16), (900, 0.2)):
@@ -131,6 +141,12 @@ def build_backdrop(grain):
             rock *= (1 - shade * amount)[..., None]
         else:
             rock += (shade * (-amount) * 42)[..., None]
+    # A rounded nose in the middle, so that part sits in front of the flanks.
+    belly = np.exp(-0.5 * ((tt - 0.42) / 0.36) ** 2)
+    nose = np.exp(-0.5 * ((flank + 0.05) / 0.16) ** 2) * belly
+    turn = np.exp(-0.5 * ((np.abs(flank) - 0.34) / 0.1) ** 2) * belly
+    rock += nose[..., None] * np.array([16, 22, 34], np.float32)
+    rock *= (1 - turn * 0.52)[..., None]
     frame[cone] = np.clip(rock, 0, 255)[cone]
 
     ground = (yy >= 492) & ~cone
