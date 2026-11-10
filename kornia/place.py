@@ -88,16 +88,16 @@ def build_backdrop(grain):
         )
         depth = yy - peaks[None, :]
         mask = np.clip(depth / soften, 0, 1)
-        mask = cv2.GaussianBlur(mask, (0, 0), 1.3)
-        crest = np.exp(-np.clip(depth, 0, None) / (soften * 0.75)) * mask
-        lit = np.minimum(color + np.array([36, 30, 24], np.float32), 190)
+        mask = cv2.GaussianBlur(mask, (0, 0), 1.0)
+        crest = np.exp(-np.clip(depth, 0, None) / (soften * 0.65)) * mask
+        lit = np.minimum(color + np.array([48, 40, 32], np.float32), 200)
         tone = color * (0.94 + 0.1 * grain)[..., None]
-        tone = tone * (1 - crest[..., None] * 0.55) + lit * (crest[..., None] * 0.55)
+        tone = tone * (1 - crest[..., None] * 0.72) + lit * (crest[..., None] * 0.72)
         alpha = (mask * cover)[..., None]
         frame[:] = frame * (1 - alpha) + tone * alpha
 
-    lay_ridge(248, 58, np.array([78, 72, 66], np.float32), 0.9, 12)
-    lay_ridge(308, 40, np.array([48, 46, 44], np.float32), 0.94, 9)
+    lay_ridge(232, 68, np.array([58, 54, 50], np.float32), 0.97, 8)
+    lay_ridge(292, 48, np.array([32, 30, 28], np.float32), 0.98, 6)
 
     apex_x, apex_y = APEX
     span = BASE_Y - apex_y
