@@ -113,22 +113,17 @@ def build_backdrop(grain):
     cone = (t >= 0) & (t <= 1.04) & (np.abs(flank) <= 1) & (yy < HEIGHT - 8)
 
     facing = np.sqrt(np.clip(1 - np.clip(flank, -1, 1) ** 2, 0, 1))
-    light = np.clip(flank * 0.42 + facing * 0.9, 0, 1)
+    # The front of the cone is bright. The flanks turn away and go dark.
+    light = np.clip(facing ** 0.42 * 0.78 + np.clip(0.42 - flank * 0.7, 0, 1) * 0.34, 0, 1)
     narrow = cv2.resize(grain, (WIDTH // 7, HEIGHT), interpolation=cv2.INTER_AREA)
     gullies = cv2.resize(narrow, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
     gullies = cv2.GaussianBlur(gullies, (9, 9), 0)
-    shadow = np.array([26, 24, 30], np.float32)
-    lit = np.array([64, 74, 104], np.float32)
+    shadow = np.array([12, 10, 14], np.float32)
+    lit = np.array([86, 102, 142], np.float32)
     rock = shadow * (1 - light[..., None]) + lit * light[..., None]
     rock *= (0.78 + 0.36 * gullies)[..., None]
-    limb = np.clip((np.abs(flank) - 0.9) / 0.1, 0, 1)
-    rock *= (1 - limb * 0.18)[..., None]
-    # The middle of the face comes forward. The outer flanks stay put.
-    belly = np.exp(-0.5 * ((tt - 0.46) / 0.32) ** 2)
-    bulge = np.exp(-0.5 * (flank / 0.30) ** 2) * belly
-    shoulder = np.exp(-0.5 * ((np.abs(flank) - 0.42) / 0.11) ** 2) * belly
-    rock *= (1 + bulge * 0.28)[..., None]
-    rock *= (1 - shoulder * 0.2)[..., None]
+    limb = np.clip((np.abs(flank) - 0.72) / 0.28, 0, 1)
+    rock *= (1 - limb * 0.42)[..., None]
     trough = np.exp(-((xx - (apex_x - tt * 36)) ** 2) / (2 * (22 + tt * 34) ** 2))
     rock *= (1 - trough * 0.28)[..., None]
     for base_x, amount in ((80, 0.28), (220, -0.18), (360, 0.22), (620, 0.24), (760, -0.16), (900, 0.2)):
@@ -146,6 +141,12 @@ def build_backdrop(grain):
             rock *= (1 - shade * amount)[..., None]
         else:
             rock += (shade * (-amount) * 42)[..., None]
+    # A rounded nose in the middle, so that part sits in front of the flanks.
+    belly = np.exp(-0.5 * ((tt - 0.42) / 0.36) ** 2)
+    nose = np.exp(-0.5 * ((flank + 0.05) / 0.16) ** 2) * belly
+    turn = np.exp(-0.5 * ((np.abs(flank) - 0.34) / 0.1) ** 2) * belly
+    rock += nose[..., None] * np.array([16, 22, 34], np.float32)
+    rock *= (1 - turn * 0.34)[..., None]
     frame[cone] = np.clip(rock, 0, 255)[cone]
 
     ground = (yy >= 492) & ~cone
