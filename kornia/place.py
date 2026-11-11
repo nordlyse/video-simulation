@@ -285,8 +285,8 @@ def cone_lip(x):
     return BASE_Y
 
 
-def stamp_rain(mask, x, y, length, back_x, back_y, amount):
-    """A raindrop. The point faces back along the path and the head stays rounded."""
+def stamp_melt(mask, hot, x, y, length, back_x, back_y, amount, salt):
+    """A lumpy clot stretched along its path. The hot core sits in the head."""
     if length < 4 or amount <= 0:
         return
     norm = float(np.hypot(back_x, back_y))
@@ -295,31 +295,46 @@ def stamp_rain(mask, x, y, length, back_x, back_y, amount):
     else:
         bx, by = back_x / norm, back_y / norm
     px, py = -by, bx
-    head = max(2.3, min(length * 0.34, 8.5))
     tail_x = x + bx * length
     tail_y = y + by * length
-    fx, fy = -bx, -by
-    pts = [(tail_x, tail_y)]
-    for step in range(1, 8):
-        t = step / 8
-        wide = head * (t ** 1.15)
-        mx = tail_x + (x - tail_x) * t
-        my = tail_y + (y - tail_y) * t
-        pts.append((mx + px * wide, my + py * wide))
-    for step in range(1, 8):
-        ang = step / 7 * np.pi
+    steps = 8
+
+    def skin(t, side, phase):
+        neck = 0.22 + 0.35 * abs(np.sin(salt))
+        if 0.32 < t < 0.58:
+            pinch = neck + (1 - neck) * abs(t - 0.45) / 0.13
+        else:
+            pinch = 0.55 + 0.45 * abs(np.sin(t * np.pi * (1.3 + abs(np.sin(salt)))))
+        lump = 0.5 + 0.5 * abs(np.sin(t * 8.4 + salt * 2.1 + phase))
+        wide = max(0.7, min(length * 0.17 * pinch * lump, length * 0.4))
+        mx = tail_x + (x - tail_x) * t + px * np.sin(t * 6.4 + salt) * length * 0.04
+        my = tail_y + (y - tail_y) * t + py * np.sin(t * 6.4 + salt) * length * 0.04
+        return mx + px * wide * side, my + py * wide * side
+
+    pts = [skin(step / steps, 1.0, 0.0) for step in range(steps + 1)]
+    for step in range(1, 5):
+        ang = step / 5 * np.pi
+        lobe = 0.72 + 0.28 * np.sin(ang * 2.0 + salt)
         pts.append((
-            x + np.cos(ang) * px * head * 0.9 + np.sin(ang) * fx * head * 0.72,
-            y + np.cos(ang) * py * head * 0.9 + np.sin(ang) * fy * head * 0.72,
+            x + np.cos(ang) * px * length * 0.1 * lobe - bx * np.sin(ang) * length * 0.07,
+            y + np.cos(ang) * py * length * 0.1 * lobe - by * np.sin(ang) * length * 0.07,
         ))
-    for step in range(7, 0, -1):
-        t = step / 8
-        wide = head * (t ** 1.15)
-        mx = tail_x + (x - tail_x) * t
-        my = tail_y + (y - tail_y) * t
-        pts.append((mx - px * wide, my - py * wide))
+    pts.extend(skin(step / steps, -1.0, 1.8) for step in range(steps, -1, -1))
     contour = np.array([(int(round(a)), int(round(b))) for a, b in pts], np.int32)
     cv2.fillPoly(mask, [contour], float(amount))
+    core = [skin(0.58 + 0.42 * step / steps, 0.42, 0.4) for step in range(steps + 1)]
+    core.extend(skin(0.58 + 0.42 * step / steps, -0.42, 2.1) for step in range(steps, -1, -1))
+    cv2.fillPoly(hot, [np.array([(int(round(a)), int(round(b))) for a, b in core], np.int32)], float(amount))
+    if amount > 0.55 and length > 12:
+        fleck = length * (0.045 + 0.02 * abs(np.sin(salt)))
+        fx = tail_x + bx * length * 0.18
+        fy = tail_y + by * length * 0.18
+        chip = np.array([
+            (int(round(fx - px * fleck)), int(round(fy - py * fleck))),
+            (int(round(fx + bx * fleck * 1.4)), int(round(fy + by * fleck * 1.4))),
+            (int(round(fx + px * fleck * 0.6)), int(round(fy + py * fleck * 0.6))),
+        ], np.int32)
+        cv2.fillPoly(mask, [chip], float(amount * 0.4))
 
 
 def stamp_lobe(mask, x, y, radius, salt, amount):
@@ -343,7 +358,7 @@ def stamp_lobe(mask, x, y, radius, salt, amount):
 
 
 def add_fountain(frame, index):
-    """Ragged molten lava rises into a lumpy crown. Scattered pieces fall, slide, and fade."""
+    """Ragged molten lava rises into a lumpy crown. Clots fall, stretch, slide, and cool."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
@@ -414,20 +429,11 @@ def add_fountain(frame, index):
             continue
         if life < hit:
             u = life / max(hit, 1)
-            x = start_x + (land_x - start_x) * u
+            flutter = np.sin(u * 8.0 + phase) * (1 - u) * 9
+            x = start_x + (land_x - start_x) * u + flutter
             y = start_y + (land_y - start_y) * (u ** 1.35)
-            length = (10.4 + 2.6 * abs(np.sin(phase * 1.4))) * 1.35
-            stamp_rain(drops, x, y, length, start_x - x, start_y - y, 0.9)
-            cv2.ellipse(
-                heads,
-                (int(round(x)), int(round(y))),
-                (max(2, int(length * 0.16)), max(2, int(length * 0.13))),
-                0,
-                0,
-                360,
-                0.85,
-                -1,
-            )
+            length = 9 + 12 * abs(np.sin(phase * 1.4))
+            stamp_melt(drops, heads, x, y, length, start_x - x, start_y - y, 0.92, phase)
             continue
         if life < hit + slide_len:
             slide_u = (life - hit) / slide_len
@@ -456,32 +462,24 @@ def add_fountain(frame, index):
             if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
                 continue
             behind = 1 - mark / 7
-            length = (3.4 + 5.6 * (1 - behind) ** 1.5) * 1.35
-            amount = 0.32 * (0.25 + 0.75 * (1 - behind)) * trail_fade
+            length = 4.2 + 7.4 * (1 - behind) ** 1.4
+            amount = 0.28 * (0.22 + 0.78 * (1 - behind)) * trail_fade
             if amount < 0.04:
                 continue
-            stamp_rain(drops, sx, sy, length, -side * 0.62, -1.0, amount)
+            sx += np.sin(phase + mark * 1.3) * 2.2 * behind
+            stamp_melt(drops, heads, sx, sy, length, -side * 0.62, -1.0, amount, phase + mark)
         if head_fade > 0.04:
             sx, sy = slope_at(slide_u)
             if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
-                stamp_rain(drops, sx, sy, 16.8, -side * 0.62, -1.0, 0.9 * head_fade)
-                cv2.ellipse(
-                    heads,
-                    (int(round(sx)), int(round(sy))),
-                    (4, 3),
-                    0,
-                    0,
-                    360,
-                    0.7 * head_fade,
-                    -1,
-                )
+                stamp_melt(drops, heads, sx, sy, 15.5, -side * 0.62, -1.0, 0.9 * head_fade, phase + 2.0)
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
     core = cv2.GaussianBlur(mask, (21, 21), 5.5)
-    drop_cover = cv2.GaussianBlur(drops, (5, 5), 1.05)
-    drop_heart = cv2.GaussianBlur(heads, (5, 5), 1.05)
-    cover = np.clip(np.maximum(soft * 1.45, drop_cover * 1.35), 0, 1)
-    # A dense body hides the clouds, so the lava does not break into blocks.
-    cover = np.maximum(cover, np.clip((cover - 0.42) / 0.28, 0, 1))
+    drop_cover = cv2.GaussianBlur(drops, (3, 3), 0.6)
+    drop_heart = cv2.GaussianBlur(heads, (3, 3), 0.6)
+    crown = np.clip(soft * 1.45, 0, 1)
+    # A dense crown hides the clouds, so the rising lava does not break into blocks.
+    crown = np.maximum(crown, np.clip((crown - 0.42) / 0.28, 0, 1))
+    cover = np.clip(np.maximum(crown, drop_cover * 1.2), 0, 1)
     heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
     heart = np.clip(heart + drop_heart * 0.9, 0, 1)
     crust = np.array([14, 58, 150], np.float32)
@@ -723,7 +721,8 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         if pinch and t > 0.7:
             width *= (1.0 - t) / 0.3
         wave = flow_wave(pos[i, 1], index)
-        width *= 0.94 + 0.1 * max(0.0, wave) + 0.04 * np.sin(t * 5.0 + phase)
+        lump = 0.5 + 0.5 * np.sin(t * 6.2 + phase + float(pos[i, 1]) * 0.02)
+        width *= 0.8 + 0.28 * lump + 0.12 * max(0.0, wave)
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -753,14 +752,14 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
                 width *= (1.0 - t) / 0.3
             wave = max(0.0, flow_wave(pos[k, 1], index))
             heat = wave * wave * (3 - 2 * wave)
-            half = max(0.35, width * (0.42 + 0.5 * heat))
+            half = max(0.3, width * (0.18 + 0.28 * heat))
             px = -float(tangent[k, 1])
             py = float(tangent[k, 0])
             corners.append((pos[k, 0] + px * half, pos[k, 1] + py * half))
             corners.append((pos[k, 0] - px * half, pos[k, 1] - py * half))
             heats.append(heat)
         amount = 0.5 * (heats[0] + heats[1])
-        if amount < 0.02:
+        if amount < 0.34:
             continue
         quad = np.array([corners[0], corners[2], corners[3], corners[1]], np.int32)
         cv2.fillPoly(glow, [quad], int(amount * 255))
@@ -776,7 +775,7 @@ def paint_channels(frame, index):
         pos = meander(pos, index)
         tangent = tangents_of(pos)
         limb = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 1.0, 0.0, index)
-        shine = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 0.62, 0.55, index)
+        shine = limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, 0.34, 0.4, index)
         if limb is not None:
             cv2.fillPoly(body, [limb], 255)
         if shine is not None:
@@ -788,8 +787,8 @@ def paint_channels(frame, index):
     cover = np.clip(cover, 0, 1)
     light = np.clip(light, 0, 1) * cover
     heart = np.clip(heart, 0, 1) * cover
-    crust = np.array([14, 32, 96], np.float32)
-    mid = np.array([16, 62, 148], np.float32)
+    crust = np.array([6, 12, 42], np.float32)
+    mid = np.array([10, 40, 110], np.float32)
     core = np.array([96, 196, 255], np.float32)
     color = crust * (1 - light)[..., None] + mid * light[..., None]
     color = color * (1 - heart)[..., None] + core * heart[..., None]
