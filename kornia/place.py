@@ -66,7 +66,7 @@ def scrolled(field, index, speed, height):
 
 
 def build_backdrop(grain):
-    """Sky, hazy ridges, and a round cone with gullies and a scree apron."""
+    """Sky, hazy ridges, a round cone, and a meadow in front of it."""
     yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float32)
     lift = yy / (HEIGHT - 1)
     horizon = np.clip((lift - 0.42) / 0.58, 0, 1)
@@ -149,12 +149,39 @@ def build_backdrop(grain):
     rock *= (1 - turn * 0.52)[..., None]
     frame[cone] = np.clip(rock, 0, 255)[cone]
 
-    ground = (yy >= 492) & ~cone
-    plain = np.array([32, 30, 34], np.float32)
-    shade = 1.0 - 0.18 * np.clip((yy - 492) / 48, 0, 1)
-    ground_tone = plain * (0.9 + 0.18 * grain)[..., None] * shade[..., None]
-    frame[ground] = np.clip(ground_tone, 0, 255)[ground]
-    return np.clip(frame, 0, 255).astype(np.uint8)
+    meadow = (yy >= 492) & ~cone
+    coarse = cv2.resize(grain, (WIDTH // 28, HEIGHT // 28), interpolation=cv2.INTER_AREA)
+    coarse = cv2.resize(coarse, (WIDTH, HEIGHT), interpolation=cv2.INTER_LINEAR)
+    soil = np.array([20, 46, 24], np.float32)
+    leaf = np.array([30, 74, 34], np.float32)
+    patch = np.clip(coarse, 0, 1)
+    mottle = np.clip(0.2 + grain * 0.8, 0, 1)
+    shade = 1.0 - 0.28 * np.clip((yy - 492) / 48, 0, 1)
+    tone = soil * (1 - patch[..., None]) + leaf * patch[..., None]
+    tone *= (0.82 + 0.28 * mottle[..., None]) * shade[..., None]
+    frame[meadow] = np.clip(tone, 0, 255)[meadow]
+    frame = np.clip(frame, 0, 255).astype(np.uint8)
+    grass = np.random.default_rng(11)
+    count = 1500
+    xs = grass.integers(0, WIDTH, size=count)
+    ys = grass.integers(494, HEIGHT - 1, size=count)
+    heights = grass.integers(4, 22, size=count)
+    leans = grass.integers(-4, 5, size=count)
+    picks = grass.integers(0, 5, size=count)
+    blades = (
+        (24, 58, 26),
+        (32, 82, 34),
+        (18, 48, 22),
+        (40, 98, 42),
+        (28, 70, 30),
+    )
+    for blade in range(count):
+        x = int(xs[blade])
+        y = int(ys[blade])
+        top = max(476, y - int(heights[blade]))
+        tip_x = int(np.clip(x + int(leans[blade]), 0, WIDTH - 1))
+        cv2.line(frame, (x, y), (tip_x, top), blades[int(picks[blade])], 1, cv2.LINE_AA)
+    return frame
 
 
 def add_crater(frame, index):
