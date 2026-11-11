@@ -539,10 +539,18 @@ def lava_limbs(width, height):
         held = []
         for point in points:
             y = min(float(point[1]), low_y)
+            x = float(point[0])
             if held and y < float(held[-1][1]) + 1.5:
                 y = min(float(held[-1][1]) + 1.5, low_y)
-            held.append(np.array([float(point[0]), y], np.float32))
-        return held
+            if held and float(held[-1][1]) >= low_y - 1.0:
+                break
+            held.append(np.array([x, y], np.float32))
+        if not held:
+            held.append(np.array([center_x, low_y], np.float32))
+        while len(held) < 4:
+            last = held[-1]
+            held.append(np.array([float(last[0]), min(float(last[1]) + 0.6, low_y)], np.float32))
+        return held[:4]
 
     def add(p0, p1, p2, p3, start_w, end_w, phase, pinch):
         held = hold((p0, p1, p2, p3))
@@ -603,12 +611,21 @@ def lava_limbs(width, height):
         if float(end[1]) >= low_y - 16:
             return
         direction = branch[4]
-        # The thick child keeps going downhill. A thinner one peels off and still falls.
-        forks = ((0.22, 0.62, 0.48), (0.85, 0.4, 0.26)) if fine else ((0.28, 0.7, 0.5),)
+        # Near the foot the last forks open wide. Higher up they keep falling.
+        low = float(end[1]) > low_y - 150
+        if low:
+            forks = ((-0.45, 0.85, 0.38), (0.65, 0.7, 0.3), (1.45, 0.8, 0.22))
+            down = 0.72
+        elif fine:
+            forks = ((0.22, 0.62, 0.48), (0.85, 0.4, 0.26))
+            down = 0.95
+        else:
+            forks = ((0.28, 0.7, 0.5),)
+            down = 0.95
         for slot, (spread, keep, width_ratio) in enumerate(forks):
             tip = _unit(np.array([
-                direction[0] * 0.55 + normal[0] * spread,
-                0.95,
+                direction[0] * 0.4 + normal[0] * spread,
+                down,
             ], np.float32))
             room = max(18.0, low_y - 8 - float(end[1]))
             tip_len = min(length * keep, room / max(float(tip[1]), 0.3))
@@ -631,6 +648,33 @@ def lava_limbs(width, height):
     grow(trunk, 0.9, 100, 1.7, 0.45, 1, True)
     side_twig(*trunk, 0.44, 110, 2.2, 0.8, 0.2, -1)
     side_twig(*trunk, 0.78, 90, 1.8, 1.6, 0.16, 1)
+
+    def foot_run(mark, side, phase, length, width):
+        """A thin channel that opens across the lower slope and stops at the foot."""
+        origin = _bezier_at(*trunk, mark)
+        droop = 0.78 + 0.16 * abs(float(np.sin(phase)))
+        reach = 1.2 + 0.45 * abs(float(np.sin(phase * 1.4)))
+        direction = _unit(np.array([side * reach, droop], np.float32))
+        room = max(16.0, low_y - 10 - float(origin[1]))
+        travel = min(float(length), room / max(float(direction[1]), 0.28))
+        bow = np.array([side * 22.0, 16.0], np.float32)
+        p0 = origin
+        p1 = origin + direction * travel * 0.3 + np.array([side * 14.0, 8.0], np.float32)
+        p2 = origin + direction * travel * 0.68 + bow
+        p3 = origin + direction * travel
+        add(p0, p1, p2, p3, width, max(0.35, width * 0.25), phase, True)
+
+    for mark, side, phase, length, width in (
+        (0.58, -1, 0.2, 280, 2.2),
+        (0.58, 1, 1.3, 230, 1.7),
+        (0.7, -1, 0.7, 250, 1.6),
+        (0.7, 1, 1.8, 300, 2.0),
+        (0.8, -1, 1.4, 240, 1.4),
+        (0.8, 1, 0.45, 210, 1.3),
+        (0.9, -1, 2.1, 180, 1.1),
+        (0.9, 1, 0.95, 220, 1.3),
+    ):
+        foot_run(mark, side, phase, length, width)
     return limbs
 
 
