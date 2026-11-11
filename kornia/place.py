@@ -557,13 +557,16 @@ def lava_limbs(width, height):
         if abs(side) < 0.35:
             side = float(tangent[0])
         side = 1.0 if side >= 0 else -1.0
-        droop = 0.7 + 0.28 * abs(float(np.sin(phase * 1.3)))
-        direction = _unit(np.array([side * 0.92, droop], np.float32))
-        bow = np.array([-side * 12.0, 18.0], np.float32)
+        droop = 1.05 + 0.22 * abs(float(np.sin(phase * 1.3)))
+        reach = 0.48 + 0.28 * abs(float(np.sin(phase * 0.9)))
+        direction = _unit(np.array([side * reach, droop], np.float32))
+        room = max(22.0, low_y - 8 - float(origin[1]))
+        travel = min(float(length), room / max(float(direction[1]), 0.3))
+        bow = np.array([-side * 16.0, 14.0], np.float32)
         p0 = origin
-        p1 = origin + direction * length * 0.3 + tangent * 8
-        p2 = origin + direction * length * 0.68 + bow
-        p3 = origin + direction * length
+        p1 = origin + direction * travel * 0.32 + tangent * 4
+        p2 = origin + direction * travel * 0.7 + bow
+        p3 = origin + direction * travel
         held = add(p0, p1, p2, p3, start_w, max(0.45, start_w * end_ratio), phase, pinch)
         return held[0], held[1], held[2], held[3], direction
 
@@ -585,69 +588,49 @@ def lava_limbs(width, height):
         normal = np.array([-tangent[1], tangent[0]], np.float32)
         if side * normal[0] < 0:
             normal = -normal
-        branch = limb_from(origin, tangent, normal, length, start_w, phase, False, 0.2 if fine else 0.34)
-        spots = (0.28, 0.5, 0.72) if fine else (0.36, 0.66)
+        branch = limb_from(origin, tangent, normal, length, start_w, phase, False, 0.34 if fine else 0.5)
+        spots = (0.42, 0.74) if fine else (0.58,)
         for slot, spot in enumerate(spots):
             side_twig(
                 *branch[:4],
                 spot,
-                (64 if fine else 100) - slot * 10,
-                start_w * (0.28 if fine else 0.36),
-                phase + slot * 0.45,
-                0.16 if fine else 0.24,
+                (78 if fine else 96) - slot * 18,
+                start_w * (0.32 if fine else 0.4),
+                phase + slot * 0.7,
+                0.22 if fine else 0.3,
             )
         end = branch[3]
-        if float(end[1]) >= low_y - 6:
+        if float(end[1]) >= low_y - 16:
             return
         direction = branch[4]
-        spreads = (0.0, 0.42, 0.9, 1.4) if fine else (0.15, 0.7, 1.25)
-        for slot, spread in enumerate(spreads):
+        # The thick child keeps going downhill. A thinner one peels off and still falls.
+        forks = ((0.22, 0.62, 0.48), (0.85, 0.4, 0.26)) if fine else ((0.28, 0.7, 0.5),)
+        for slot, (spread, keep, width_ratio) in enumerate(forks):
             tip = _unit(np.array([
-                direction[0] * 0.9 + normal[0] * spread * 0.45,
-                0.48 + 0.12 * (slot % 3),
+                direction[0] * 0.55 + normal[0] * spread,
+                0.95,
             ], np.float32))
-            if tip[1] < 0.35:
-                tip = _unit(np.array([tip[0], 0.35], np.float32))
-            tip_len = length * (0.5 if fine else 0.38)
-            tip_w = max(0.75, start_w * (0.28 if fine else 0.4))
+            room = max(18.0, low_y - 8 - float(end[1]))
+            tip_len = min(length * keep, room / max(float(tip[1]), 0.3))
+            tip_w = max(0.7, start_w * width_ratio)
             c0 = end
             c1 = end + tip * tip_len * 0.34
-            c2 = end + tip * tip_len * 0.68
+            c2 = end + tip * tip_len * 0.7 + np.array([-normal[0] * 3.0, 8.0], np.float32)
             c3 = end + tip * tip_len
-            add(c0, c1, c2, c3, tip_w, 0.32 if fine else 0.7, phase + slot * 0.35, True)
-            if fine:
-                for hair, extra in ((0.25, 0.2), (0.95, 0.7)):
-                    hair_dir = _unit(np.array([
-                        tip[0] * 1.05 + normal[0] * hair * 0.35,
-                        0.46,
-                    ], np.float32))
-                    if hair_dir[1] < 0.3:
-                        hair_dir = _unit(np.array([hair_dir[0], 0.3], np.float32))
-                    hair_len = tip_len * 0.46
-                    h0 = c3
-                    add(
-                        h0,
-                        h0 + hair_dir * hair_len * 0.36,
-                        h0 + hair_dir * hair_len * 0.7,
-                        h0 + hair_dir * hair_len,
-                        max(0.65, tip_w * 0.5),
-                        0.28,
-                        phase + slot + extra,
-                        True,
-                    )
+            add(c0, c1, c2, c3, tip_w, max(0.4, tip_w * 0.35), phase + slot * 0.6, True)
 
-    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.492, 0.68), at(0.478, 0.84))
-    add(*trunk, 18, 2.4, 0.2, False)
-    grow(trunk, 0.16, 210, 5.8, 0.4, -1, False)
-    grow(trunk, 0.24, 200, 5.2, 1.1, 1, False)
-    grow(trunk, 0.38, 240, 4.4, 0.7, -1, True)
-    grow(trunk, 0.46, 230, 4.0, 1.6, 1, True)
-    grow(trunk, 0.58, 250, 3.4, 0.9, -1, True)
-    grow(trunk, 0.66, 240, 3.1, 1.8, 1, True)
-    grow(trunk, 0.76, 220, 2.6, 2.2, -1, True)
-    grow(trunk, 0.86, 190, 2.2, 0.5, 1, True)
-    for spot, side, phase in ((0.3, -1, 0.3), (0.5, 1, 0.9), (0.68, -1, 1.4)):
-        side_twig(*trunk, spot, 160, 2.4, phase, 0.18, side)
+    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
+    add(*trunk, 18, 3.2, 0.2, False)
+    grow(trunk, 0.14, 240, 7.0, 0.3, -1, False)
+    grow(trunk, 0.24, 190, 5.0, 1.35, 1, False)
+    grow(trunk, 0.38, 220, 4.6, 0.55, -1, True)
+    grow(trunk, 0.5, 160, 3.2, 1.9, 1, True)
+    grow(trunk, 0.62, 200, 3.4, 0.85, -1, True)
+    grow(trunk, 0.72, 145, 2.6, 2.4, 1, True)
+    grow(trunk, 0.82, 130, 2.2, 1.25, -1, True)
+    grow(trunk, 0.9, 100, 1.7, 0.45, 1, True)
+    side_twig(*trunk, 0.44, 110, 2.2, 0.8, 0.2, -1)
+    side_twig(*trunk, 0.78, 90, 1.8, 1.6, 0.16, 1)
     return limbs
 
 
@@ -706,7 +689,7 @@ def tangents_of(pos):
 
 def flow_wave(y, index):
     """A long soft band that creeps downhill. The same height shares one wave, so forks split it."""
-    return float(np.sin((float(y) - index * 2.0) * 0.024))
+    return float(np.sin((float(y) - index * 0.75) * 0.02))
 
 
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
