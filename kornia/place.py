@@ -249,24 +249,44 @@ def add_clouds(frame, index):
     frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
-def add_plume(frame, index, billow):
-    """One ash column. Noise bulges the sides so it is not a stack of rings."""
-    yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float32)
+def add_flames(frame, index, billow):
+    """Soft tongues. Wide and bright low down, thin and faint at the tips."""
+    glow = np.zeros((HEIGHT, WIDTH), np.float32)
+    heat = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    height_frac = np.clip((cy - yy) / 320.0, 0, 1)
-    lean = height_frac ** 2 * 96 + np.sin(height_frac * 6.0 + index * 0.22) * (8 + height_frac * 24)
-    column_x = cx + lean
-    width = 22 + height_frac * 78 + (billow - 0.5) * 36
-    dx = (xx - column_x) / np.maximum(width, 8)
-    column = np.exp(-0.5 * dx * dx) * np.clip(1.05 - height_frac, 0, 1)
-    column *= 0.7 + 0.85 * billow
-    column[yy > cy + 8] = 0
-    soft = cv2.GaussianBlur(column.astype(np.float32), (21, 21), 5)
-    gray = 22 + soft * 110
-    ash = np.dstack((gray * 0.75, gray * 0.78, gray * 0.8))
-    alpha = np.clip(soft * 1.35, 0, 0.84)[..., None]
+    for tongue in range(8):
+        phase = tongue * 1.47
+        flicker = np.sin(index * 0.5 + phase)
+        height = 146 + 78 * abs(np.sin(phase * 0.86)) + flicker * 14
+        height = float(np.clip(height, 132, 228))
+        spread = np.sin(phase * 1.2) * 58 + np.sin(index * 0.36 + phase) * 8
+        for step in range(20):
+            t = step / 19
+            y = cy + 4 - t * height
+            wobble = np.sin(t * 5.1 + phase + index * 0.48) * (2 + t * 9)
+            x = cx + spread * np.sin(t * np.pi * 0.75) + wobble
+            sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
+            sample_x = int(np.clip(round(x), 0, WIDTH - 1))
+            grain = float(billow[sample_y, sample_x])
+            taper = (1 - t) ** 0.62
+            belly = 0.45 + 0.55 * np.sin((t ** 0.55) * np.pi)
+            radius = (6.0 + 21.0 * belly) * (0.22 + 0.78 * taper) * (0.8 + 0.3 * grain)
+            amount = (0.22 + 0.78 * taper) * (0.65 + 0.35 * grain)
+            center = (int(round(x)), int(round(y)))
+            cv2.circle(glow, center, max(2, int(round(radius))), float(amount), -1)
+            if t < 0.48:
+                cv2.circle(heat, center, max(2, int(round(radius * 0.4))), float(amount), -1)
+    glow = cv2.GaussianBlur(glow, (21, 21), 5.0)
+    heat = cv2.GaussianBlur(heat, (11, 11), 2.4)
+    glow = np.clip(glow, 0, 1)
+    heat = np.clip(heat, 0, 1)
+    red = np.array([6, 18, 90], np.float32)
+    orange = np.array([12, 90, 235], np.float32)
+    white = np.array([160, 235, 255], np.float32)
+    fire = glow[..., None] * red * 0.7 + np.clip(glow * 1.35, 0, 1)[..., None] * orange * 0.85
+    fire = fire + heat[..., None] * white * 1.05
     base = frame.astype(np.float32)
-    frame[:] = np.clip(base * (1 - alpha) + ash * alpha, 0, 255).astype(np.uint8)
+    frame[:] = np.clip(base + fire, 0, 255).astype(np.uint8)
 
 
 def cone_lip(x):
@@ -337,70 +357,11 @@ def stamp_melt(mask, hot, x, y, length, back_x, back_y, amount, salt):
         cv2.fillPoly(mask, [chip], float(amount * 0.4))
 
 
-def stamp_lobe(mask, x, y, radius, salt, amount):
-    """A stretched lobe. Neighbors melt together after the shared blur."""
-    if radius < 1:
-        return
-    wide = max(2, int(radius * (0.92 + 0.12 * np.sin(salt))))
-    tall = max(2, int(radius * (0.76 + 0.12 * np.cos(salt * 1.3))))
-    center = (int(round(x)), int(round(y)))
-    cv2.ellipse(mask, center, (wide, tall), float((salt * 23) % 180), 0, 360, amount, -1)
-    cv2.ellipse(
-        mask,
-        (center[0] + int(np.cos(salt) * radius * 0.28), center[1] + int(np.sin(salt * 0.7) * radius * 0.18)),
-        (max(1, wide // 2), max(1, int(tall * 0.46))),
-        float((salt * 47) % 180),
-        0,
-        360,
-        amount * 0.75,
-        -1,
-    )
-
-
 def add_fountain(frame, index):
-    """Ragged molten lava rises into a lumpy crown. Clots fall, stretch, slide, and cool."""
+    """Clots fall from the flames, stretch, slide, and cool."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
     cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
-    for strand in range(7):
-        lean = (strand - 3) * 16
-        phase = strand * 1.15
-        for step in range(7):
-            if np.sin(step * 1.8 + phase + index * 0.11) < -0.55:
-                continue
-            rise = step / 6
-            y = cy - 10 - rise * (cy - 10 - (cap_y + 22))
-            wobble = np.sin(rise * 5.1 + phase + index * 0.16) * (10 + rise * 24)
-            x = cx + lean * (0.3 + rise) + wobble
-            size = 9 + (1 - rise) * 7 + 3 * abs(np.sin(phase + step))
-            stamp_lobe(mask, x, y, size, phase + step, 1.0)
-    florets = (
-        (0, 8, 30, 0.62),
-        (-32, 12, 24, 0.55),
-        (34, 10, 25, 0.58),
-        (-14, -2, 26, 0.8),
-        (16, -4, 24, 0.84),
-        (-50, 6, 19, 0.7),
-        (52, 4, 20, 0.72),
-        (-22, -16, 18, 0.95),
-        (24, -18, 19, 0.96),
-        (0, -20, 17, 1.0),
-        (-68, 10, 16, 0.64),
-        (70, 8, 17, 0.66),
-        (-58, -8, 15, 0.88),
-        (60, -6, 16, 0.86),
-        (-36, -18, 14, 1.0),
-        (38, -20, 15, 1.0),
-        (2, -24, 13, 1.0),
-        (-82, 2, 13, 0.6),
-        (84, 0, 14, 0.62),
-        (-12, 18, 14, 0.5),
-        (16, 20, 13, 0.48),
-    )
-    for slot, (ox, oy, radius, heat) in enumerate(florets):
-        sway = np.sin(index * 0.14 + slot) * 2.2
-        stamp_lobe(mask, cx + ox + sway, cap_y + oy, radius, slot * 0.8, 0.75 + 0.25 * heat)
-        stamp_lobe(mask, cx + ox + sway + np.cos(slot) * 5, cap_y + oy - radius * 0.28, radius * 0.46, slot, 0.55 + 0.45 * heat)
     drops = np.zeros(frame.shape[:2], np.float32)
     heads = np.zeros(frame.shape[:2], np.float32)
     for n in range(15):
@@ -927,10 +888,10 @@ def open_writer(width, height, fps):
 def compose_frame(index, sprite, lobe_field, backdrop):
     frame = backdrop.copy()
     add_clouds(frame, index)
-    billow = scrolled(lobe_field, index, 1.4, HEIGHT)
-    add_plume(frame, index, billow)
     add_crater(frame, index)
     melt = paint_channels(frame, index)
+    billow = scrolled(lobe_field, index, 1.4, HEIGHT)
+    add_flames(frame, index, billow)
     add_fountain(frame, index)
     sway_grass(frame, index)
     placed = False
