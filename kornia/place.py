@@ -250,40 +250,43 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """Tongues of fire rise from the crater. The base is white-hot and the tips thin out."""
+    """Tongues swell as they rise, then narrow. The base stays the hottest part."""
     body = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    for tongue in range(11):
-        phase = tongue * 1.17
+    for tongue in range(7):
+        phase = tongue * 1.31
         flicker = np.sin(index * 0.45 + phase)
         short = tongue % 3 == 0
-        height = (36 if short else 78) + (28 if short else 78) * abs(np.sin(phase * 0.8)) + flicker * 12
-        height = float(np.clip(height, 28, 160))
-        lean = np.sin(phase * 1.3) * (22 if short else 78) + np.sin(index * 0.33 + phase) * 10
+        height = (42 if short else 88) + (24 if short else 64) * abs(np.sin(phase * 0.8)) + flicker * 10
+        height = float(np.clip(height, 34, 156))
+        spread = np.sin(phase * 1.3) * (16 if short else 42) + np.sin(index * 0.33 + phase) * 8
         left = []
         right = []
-        steps = 7
+        steps = 10
         for step in range(steps):
             t = step / (steps - 1)
             y = cy + 2 - t * height
-            wobble = np.sin(t * 5.4 + phase + index * 0.4) * (2 + t * 8)
-            x = cx + np.sin(phase) * 10 + lean * (t ** 1.45) + wobble
+            wobble = np.sin(t * 4.2 + phase + index * 0.4) * (2 + t * 7)
+            x = cx + spread * np.sin(t * np.pi * 0.9) + wobble
             sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
             sample_x = int(np.clip(round(x), 0, WIDTH - 1))
             grain = float(billow[sample_y, sample_x])
-            wide = (7.5 * (1 - t) + 2.4) * (0.75 + 0.35 * grain)
-            wide *= 0.72 + 0.28 * abs(np.sin(t * 6.5 + phase))
+            # Narrow at the vent, wider through the body, thin again at the tip.
+            belly = np.sin((t ** 0.72) * np.pi)
+            tip = 1 - np.clip((t - 0.78) / 0.22, 0, 1) * 0.65
+            wide = (3.4 + 15.5 * belly) * tip * (0.78 + 0.32 * grain)
+            wide *= 0.82 + 0.18 * abs(np.sin(t * 5.2 + phase))
             left.append((x - wide, y))
             right.append((x + wide, y))
         poly = np.array([(int(round(a)), int(round(b))) for a, b in left + right[::-1]], np.int32)
         cv2.fillPoly(body, [poly], 1.0)
-    body = cv2.GaussianBlur(body, (5, 5), 1.15)
+    body = cv2.GaussianBlur(body, (7, 7), 1.7)
     body = np.clip(body, 0, 1)
     yy, xx = np.mgrid[0:HEIGHT, 0:WIDTH].astype(np.float32)
-    vent = np.hypot((xx - cx) / 26.0, (yy - (cy - 6)) / 18.0)
-    hot = np.clip(1.15 - vent, 0, 1) ** 1.3
-    shade = np.clip(body * 1.8, 0, 1)
-    heat = hot * shade
+    vent = np.hypot((xx - cx) / 22.0, (yy - (cy - 4)) / 16.0)
+    hot = np.clip(1.1 - vent, 0, 1) ** 1.2
+    shade = np.clip(body * 1.7, 0, 1)
+    heat = shade * np.clip(1.05 - (cy - yy) / 48.0, 0, 1) * (0.35 + 0.65 * hot)
     red = np.array([8, 22, 100], np.float32)
     orange = np.array([16, 96, 230], np.float32)
     white = np.array([150, 230, 255], np.float32)
