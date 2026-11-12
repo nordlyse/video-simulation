@@ -250,60 +250,43 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """A wide flame that keeps narrowing as it rises. The core stays hotter than the edge."""
-    body = np.zeros((HEIGHT, WIDTH), np.float32)
-    core = np.zeros((HEIGHT, WIDTH), np.float32)
+    """Soft tongues. Wide and bright low down, thin and faint at the tips."""
+    glow = np.zeros((HEIGHT, WIDTH), np.float32)
+    heat = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    for tongue in range(7):
-        phase = tongue * 1.31
-        flicker = np.sin(index * 0.45 + phase)
-        short = tongue % 3 == 0
-        height = (48 if short else 96) + (22 if short else 58) * abs(np.sin(phase * 0.8)) + flicker * 10
-        height = float(np.clip(height, 36, 158))
-        spread = np.sin(phase * 1.3) * (22 if short else 58) + np.sin(index * 0.33 + phase) * 8
-        left = []
-        right = []
-        cleft = []
-        cright = []
-        steps = 10
-        for step in range(steps):
-            t = step / (steps - 1)
-            y = cy + 2 - t * height
-            wobble = np.sin(t * 4.2 + phase + index * 0.4) * (2 + t * 7)
-            x = cx + spread * np.sin(t * np.pi * 0.85) + wobble
+    for tongue in range(8):
+        phase = tongue * 1.47
+        flicker = np.sin(index * 0.5 + phase)
+        height = 62 + 78 * abs(np.sin(phase * 0.86)) + flicker * 12
+        height = float(np.clip(height, 40, 152))
+        spread = np.sin(phase * 1.2) * 52 + np.sin(index * 0.36 + phase) * 8
+        for step in range(16):
+            t = step / 15
+            y = cy + 4 - t * height
+            wobble = np.sin(t * 5.1 + phase + index * 0.48) * (2 + t * 9)
+            x = cx + spread * np.sin(t * np.pi * 0.75) + wobble
             sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
             sample_x = int(np.clip(round(x), 0, WIDTH - 1))
             grain = float(billow[sample_y, sample_x])
-            # Wide through the lower body, then steadily thinner toward the tip.
-            belly = np.sin((t ** 0.45) * np.pi)
-            taper = (1 - t) ** 0.55
-            wide = (8.0 + 24.0 * belly) * (0.32 + 0.68 * taper) * (0.8 + 0.28 * grain)
-            wide *= 0.86 + 0.14 * abs(np.sin(t * 5.2 + phase))
-            left.append((x - wide, y))
-            right.append((x + wide, y))
-            if t < 0.62:
-                cleft.append((x - wide * 0.38, y))
-                cright.append((x + wide * 0.38, y))
-        poly = np.array([(int(round(a)), int(round(b))) for a, b in left + right[::-1]], np.int32)
-        cv2.fillPoly(body, [poly], 1.0)
-        if len(cleft) > 2:
-            inner = np.array([(int(round(a)), int(round(b))) for a, b in cleft + cright[::-1]], np.int32)
-            cv2.fillPoly(core, [inner], 1.0)
-    body = cv2.GaussianBlur(body, (9, 9), 2.0)
-    core = cv2.GaussianBlur(core, (7, 7), 1.6)
-    body = np.clip(body, 0, 1)
-    rise = np.clip((cy + 6 - np.mgrid[0:HEIGHT, 0:WIDTH][0].astype(np.float32)) / 130.0, 0, 1)
-    body *= 1 - rise * 0.4
-    shade = np.clip(body * 1.6, 0, 1)
-    heat = np.clip(core, 0, 1) * shade
-    red = np.array([8, 22, 100], np.float32)
-    orange = np.array([16, 96, 230], np.float32)
-    white = np.array([150, 230, 255], np.float32)
-    color = red * (1 - shade)[..., None] + orange * shade[..., None]
-    color = color * (1 - heat)[..., None] + white * heat[..., None]
-    alpha = np.clip(body * 1.25, 0, 0.9)[..., None]
+            taper = (1 - t) ** 0.62
+            belly = 0.45 + 0.55 * np.sin((t ** 0.35) * np.pi)
+            radius = (5.0 + 18.0 * belly) * (0.22 + 0.78 * taper) * (0.8 + 0.3 * grain)
+            amount = (0.22 + 0.78 * taper) * (0.65 + 0.35 * grain)
+            center = (int(round(x)), int(round(y)))
+            cv2.circle(glow, center, max(2, int(round(radius))), float(amount), -1)
+            if t < 0.48:
+                cv2.circle(heat, center, max(2, int(round(radius * 0.4))), float(amount), -1)
+    glow = cv2.GaussianBlur(glow, (21, 21), 5.0)
+    heat = cv2.GaussianBlur(heat, (11, 11), 2.4)
+    glow = np.clip(glow, 0, 1)
+    heat = np.clip(heat, 0, 1)
+    red = np.array([6, 18, 90], np.float32)
+    orange = np.array([12, 90, 235], np.float32)
+    white = np.array([160, 235, 255], np.float32)
+    fire = glow[..., None] * red * 0.7 + np.clip(glow * 1.35, 0, 1)[..., None] * orange * 0.85
+    fire = fire + heat[..., None] * white * 1.05
     base = frame.astype(np.float32)
-    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
+    frame[:] = np.clip(base + fire, 0, 255).astype(np.uint8)
 
 
 def cone_lip(x):
