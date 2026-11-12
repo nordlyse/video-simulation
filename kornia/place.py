@@ -257,9 +257,9 @@ def add_flames(frame, index, billow):
     for tongue in range(8):
         phase = tongue * 1.47
         flicker = np.sin(index * 0.5 + phase)
-        height = 118 + 88 * abs(np.sin(phase * 0.86)) + flicker * 16
-        height = float(np.clip(height, 96, 210))
-        spread = np.sin(phase * 1.2) * 74 + np.sin(index * 0.36 + phase) * 10
+        height = 146 + 78 * abs(np.sin(phase * 0.86)) + flicker * 14
+        height = float(np.clip(height, 132, 228))
+        spread = np.sin(phase * 1.2) * 58 + np.sin(index * 0.36 + phase) * 8
         for step in range(20):
             t = step / 19
             y = cy + 4 - t * height
@@ -269,8 +269,8 @@ def add_flames(frame, index, billow):
             sample_x = int(np.clip(round(x), 0, WIDTH - 1))
             grain = float(billow[sample_y, sample_x])
             taper = (1 - t) ** 0.62
-            belly = 0.45 + 0.55 * np.sin((t ** 0.35) * np.pi)
-            radius = (8.0 + 28.0 * belly) * (0.22 + 0.78 * taper) * (0.8 + 0.3 * grain)
+            belly = 0.45 + 0.55 * np.sin((t ** 0.55) * np.pi)
+            radius = (6.0 + 21.0 * belly) * (0.22 + 0.78 * taper) * (0.8 + 0.3 * grain)
             amount = (0.22 + 0.78 * taper) * (0.65 + 0.35 * grain)
             center = (int(round(x)), int(round(y)))
             cv2.circle(glow, center, max(2, int(round(radius))), float(amount), -1)
