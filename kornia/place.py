@@ -264,9 +264,10 @@ def add_flames(frame, index, billow):
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
         sample_x = int(np.clip(round(cx), 0, WIDTH - 1))
         grain = float(billow[sample_y, sample_x])
-        radius = (34 + 12 * grain) * (0.92 + 0.1 * np.sin(phase))
+        puffiness = 1.0 + 0.5 * (lobe / 4.0)
+        radius = (34 + 12 * grain) * (0.92 + 0.1 * np.sin(phase)) * puffiness
         amount = 1.0
-        center_x = cx + np.sin(index * 0.16 + phase) * 14
+        center_x = cx + np.sin(index * 0.16 + phase) * (14 * puffiness)
         center = (int(round(center_x)), int(round(y)))
         cv2.circle(cover, center, max(8, int(round(radius))), amount, -1)
         cv2.circle(lit, center, max(6, int(round(radius * 0.9))), 0.95, -1)
@@ -278,7 +279,10 @@ def add_flames(frame, index, billow):
             (-0.16, -0.28, 0.72),
         ):
             drift = np.sin(index * 0.22 + phase + ox) * 3
-            spot = (int(round(center_x + ox * radius + drift)), int(round(y + oy * radius)))
+            spot = (
+                int(round(center_x + ox * radius * (0.85 + 0.35 * lobe / 4.0) + drift)),
+                int(round(y + oy * radius * (0.85 + 0.35 * lobe / 4.0))),
+            )
             puff = max(5, int(round(radius * scale)))
             cv2.circle(cover, spot, puff, amount, -1)
             cv2.circle(lit, spot, max(4, int(round(puff * 0.88))), 0.9, -1)
