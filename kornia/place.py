@@ -358,43 +358,49 @@ def stamp_melt(mask, hot, x, y, length, back_x, back_y, amount, salt):
 
 
 def add_fountain(frame, index):
-    """Clots fall from the flames, stretch, slide, and cool."""
+    """Clots spill from just under the flame, fall down the face, then slide and cool."""
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    cap_y = cy - 150
     mask = np.zeros(frame.shape[:2], np.float32)
     drops = np.zeros(frame.shape[:2], np.float32)
     heads = np.zeros(frame.shape[:2], np.float32)
-    for n in range(15):
+    pour = np.zeros(frame.shape[:2], np.float32)
+    for n in range(8):
         phase = n * 2.399
-        aim = np.sin(phase * 1.7)
-        reach = 26 + 84 * abs(np.sin(phase * 0.8))
-        start_x = cx + aim * reach
-        start_y = cap_y + 6 + (n * 17 % 34)
-        drift = np.cos(phase * 2.1) * 34
-        fall_px = 150 + 100 * abs(aim)
-        fall_len = 36 + (n * 5 % 18)
+        side = 1.0 if np.sin(phase * 1.3) >= 0 else -1.0
+        lip = 10 + 36 * abs(np.sin(phase * 0.91))
+        start_x = cx + side * lip
+        start_y = cy + 8 + (n % 4) * 2.0
+        drop = 110 + 70 * abs(np.sin(phase * 1.15))
+        lean = side * (4 + 0.08 * drop)
+        fall_len = 34 + (n * 3 % 10)
         slide_len = 84 + (n * 7 % 16)
         trail_len = 46
         life = (index * 0.9 + n * 11.0) % (fall_len + slide_len + trail_len)
-        land_x = land_y = None
+        land_x = start_x + lean
+        land_y = min(start_y + drop, BASE_Y - 36)
         hit = fall_len
-        for step in range(1, 9):
-            t = step / 8
-            px = start_x + drift * t
-            py = start_y + fall_px * (t ** 1.65)
-            if py >= cone_lip(px):
-                land_x, land_y = px, py
-                hit = t * fall_len
-                break
-        if land_x is None:
-            continue
         if life < hit:
-            u = life / max(hit, 1)
-            flutter = np.sin(u * 8.0 + phase) * (1 - u) * 9
-            x = start_x + (land_x - start_x) * u + flutter
-            y = start_y + (land_y - start_y) * (u ** 1.35)
-            length = 9 + 12 * abs(np.sin(phase * 1.4))
-            stamp_melt(drops, heads, x, y, length, start_x - x, start_y - y, 0.92, phase)
+            u = life / max(hit, 1.0)
+            fall_u = u ** 1.15
+            head_x = start_x + lean * fall_u
+            head_y = start_y + (land_y - start_y) * fall_u
+            span = max(head_y - start_y, 6.0)
+            steps = max(6, int(span / 4.0))
+            for step in range(steps):
+                t = step / (steps - 1) if steps > 1 else 1.0
+                bow = np.sin(t * np.pi) * side * (3 + 2 * np.sin(phase))
+                x = start_x + (head_x - start_x) * t + bow
+                y = start_y + (head_y - start_y) * t
+                amount = 0.16 + 0.7 * (t ** 1.4)
+                radius = 1.6 + 1.8 * t
+                center = (int(round(x)), int(round(y)))
+                cv2.circle(pour, center, max(2, int(round(radius))), float(amount), -1)
+            length = 11 + 16 * fall_u
+            stamp_melt(
+                drops, heads, head_x, head_y, length,
+                start_x - head_x, start_y - head_y - 5,
+                0.95, phase,
+            )
             continue
         if life < hit + slide_len:
             slide_u = (life - hit) / slide_len
@@ -407,9 +413,10 @@ def add_fountain(frame, index):
                 continue
             trail_fade = 1 - trail_u
             head_fade = max(0.0, 1 - trail_u / 0.28)
+        spill = side
         side = np.sign(land_x - APEX[0])
         if abs(land_x - APEX[0]) < 36:
-            side = 1.0 if aim >= 0 else -1.0
+            side = spill
         run = (BASE_Y - 18 - land_y) * 0.82
 
         def slope_at(frac):
@@ -433,6 +440,8 @@ def add_fountain(frame, index):
             sx, sy = slope_at(slide_u)
             if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
                 stamp_melt(drops, heads, sx, sy, 15.5, -side * 0.62, -1.0, 0.9 * head_fade, phase + 2.0)
+    pour = cv2.GaussianBlur(pour, (7, 7), 1.6)
+    drops = np.maximum(drops, np.clip(pour, 0, 1))
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
     core = cv2.GaussianBlur(mask, (21, 21), 5.5)
     drop_cover = cv2.GaussianBlur(drops, (3, 3), 0.6)
