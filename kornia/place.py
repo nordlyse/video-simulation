@@ -250,41 +250,54 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """Soft tongues. Wide and bright low down, thin and faint at the tips."""
+    """Hot lava boils upward as a column of soft cloud lobes."""
     glow = np.zeros((HEIGHT, WIDTH), np.float32)
     heat = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    for tongue in range(8):
-        phase = tongue * 1.47
-        flicker = np.sin(index * 0.5 + phase)
-        height = 146 + 78 * abs(np.sin(phase * 0.86)) + flicker * 14
-        height = float(np.clip(height, 132, 228))
-        spread = np.sin(phase * 1.2) * 58 + np.sin(index * 0.36 + phase) * 8
-        for step in range(20):
-            t = step / 19
-            y = cy + 4 - t * height
-            wobble = np.sin(t * 5.1 + phase + index * 0.48) * (2 + t * 9)
-            x = cx + spread * np.sin(t * np.pi * 0.75) + wobble
-            sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
-            sample_x = int(np.clip(round(x), 0, WIDTH - 1))
-            grain = float(billow[sample_y, sample_x])
-            taper = (1 - t) ** 0.62
-            belly = 0.45 + 0.55 * np.sin((t ** 0.55) * np.pi)
-            radius = (6.0 + 21.0 * belly) * (0.22 + 0.78 * taper) * (0.8 + 0.3 * grain)
-            amount = (0.22 + 0.78 * taper) * (0.65 + 0.35 * grain)
-            center = (int(round(x)), int(round(y)))
-            cv2.circle(glow, center, max(2, int(round(radius))), float(amount), -1)
-            if t < 0.48:
-                cv2.circle(heat, center, max(2, int(round(radius * 0.4))), float(amount), -1)
-    glow = cv2.GaussianBlur(glow, (21, 21), 5.0)
-    heat = cv2.GaussianBlur(heat, (11, 11), 2.4)
+    for lobe in range(6):
+        phase = lobe * 1.7
+        lift = (index * 1.5 + lobe * 9.0) % 34.0
+        y = cy - 4 - lobe * 26 - lift
+        if y < 8:
+            continue
+        height_t = np.clip((cy - y) / 170.0, 0.0, 1.0)
+        sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
+        sample_x = int(np.clip(round(cx + np.sin(phase) * 12), 0, WIDTH - 1))
+        grain = float(billow[sample_y, sample_x])
+        swell = 0.75 + 0.7 * np.sin(min(height_t, 1.0) * np.pi)
+        body = swell * (0.82 + 0.28 * grain)
+        radius = (20 + 16 * swell) * (0.85 + 0.25 * grain)
+        amount = 0.72 * body
+        spread = radius * 0.62
+        center = (int(round(cx + np.sin(index * 0.2 + phase) * 5)), int(round(y)))
+        cv2.circle(glow, center, max(4, int(round(radius))), float(amount), -1)
+        cv2.circle(heat, center, max(3, int(round(radius * 0.58))), float(amount), -1)
+        lumps = (
+            (0.7, -0.2, 0.78),
+            (-0.75, 0.15, 0.74),
+            (0.25, 0.55, 0.66),
+            (-0.3, -0.5, 0.7),
+            (1.05, 0.35, 0.5),
+            (-1.0, -0.28, 0.48),
+        )
+        for ox, oy, scale in lumps:
+            drift = np.sin(index * 0.25 + phase + ox) * 3
+            px = center[0] + ox * spread + drift
+            py = y + oy * spread * 0.75
+            spot = (int(round(px)), int(round(py)))
+            puff_r = radius * scale
+            cv2.circle(glow, spot, max(3, int(round(puff_r))), float(amount * 0.9), -1)
+            if height_t < 0.8:
+                cv2.circle(heat, spot, max(2, int(round(puff_r * 0.42))), float(amount * 0.75), -1)
+    glow = cv2.GaussianBlur(glow, (35, 35), 9.0)
+    heat = cv2.GaussianBlur(heat, (21, 21), 5.0)
     glow = np.clip(glow, 0, 1)
     heat = np.clip(heat, 0, 1)
-    red = np.array([6, 18, 90], np.float32)
-    orange = np.array([12, 90, 235], np.float32)
-    white = np.array([160, 235, 255], np.float32)
-    fire = glow[..., None] * red * 0.7 + np.clip(glow * 1.35, 0, 1)[..., None] * orange * 0.85
-    fire = fire + heat[..., None] * white * 1.05
+    lava = np.array([10, 70, 230], np.float32)
+    molten = np.array([36, 180, 255], np.float32)
+    white = np.array([200, 248, 255], np.float32)
+    fire = glow[..., None] * lava * 0.8 + np.clip(glow * 1.25, 0, 1)[..., None] * molten * 0.95
+    fire = fire + heat[..., None] * white * 1.15
     base = frame.astype(np.float32)
     frame[:] = np.clip(base + fire, 0, 255).astype(np.uint8)
 
