@@ -250,43 +250,44 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """Lava above the crater gathers into clouds. Hotter lava rises into them."""
+    """Separate lava clouds pile up above the crater. Hotter lava rises into them."""
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     lit = np.zeros((HEIGHT, WIDTH), np.float32)
     heart = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    for lobe in range(5):
-        phase = lobe * 1.9
-        lift = (index * 1.1 + lobe * 11.0) % 28.0
-        y = cy - 22 - lobe * 18 - lift
-        if y < 10:
+    banks = (
+        (0, 22, 0.82),
+        (-40, 52, 0.8),
+        (44, 48, 0.78),
+        (-16, 78, 0.92),
+        (20, 84, 0.88),
+        (0, 112, 0.84),
+        (-54, 102, 0.7),
+        (58, 96, 0.68),
+        (8, 142, 0.72),
+    )
+    for lobe, (ox, oy, scale) in enumerate(banks):
+        phase = lobe * 1.7
+        lift = (index * 0.8 + lobe * 7.0) % 16.0
+        y = cy - oy - lift
+        if y < 8:
             continue
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
-        sample_x = int(np.clip(round(cx), 0, WIDTH - 1))
+        sample_x = int(np.clip(round(cx + ox), 0, WIDTH - 1))
         grain = float(billow[sample_y, sample_x])
-        puffiness = 1.0 + 0.5 * (lobe / 4.0)
-        radius = (34 + 12 * grain) * (0.92 + 0.1 * np.sin(phase)) * puffiness
-        amount = 1.0
-        center_x = cx + np.sin(index * 0.16 + phase) * (14 * puffiness)
+        radius = (22 + 8 * grain) * scale
+        center_x = cx + ox + np.sin(index * 0.14 + phase) * 6
         center = (int(round(center_x)), int(round(y)))
-        cv2.circle(cover, center, max(8, int(round(radius))), amount, -1)
-        cv2.circle(lit, center, max(6, int(round(radius * 0.9))), 0.95, -1)
-        cv2.circle(heart, center, max(4, int(round(radius * 0.4))), 0.5, -1)
-        for ox, oy, scale in (
-            (0.42, -0.12, 0.78),
-            (-0.4, 0.14, 0.74),
-            (0.12, 0.32, 0.7),
-            (-0.16, -0.28, 0.72),
-        ):
-            drift = np.sin(index * 0.22 + phase + ox) * 3
-            spot = (
-                int(round(center_x + ox * radius * (0.85 + 0.35 * lobe / 4.0) + drift)),
-                int(round(y + oy * radius * (0.85 + 0.35 * lobe / 4.0))),
-            )
-            puff = max(5, int(round(radius * scale)))
-            cv2.circle(cover, spot, puff, amount, -1)
-            cv2.circle(lit, spot, max(4, int(round(puff * 0.88))), 0.9, -1)
-            cv2.circle(heart, spot, max(3, int(round(puff * 0.32))), 0.4, -1)
+        cv2.circle(cover, center, max(6, int(round(radius))), 1.0, -1)
+        cv2.circle(lit, center, max(5, int(round(radius * 0.88))), 0.94, -1)
+        cv2.circle(heart, center, max(3, int(round(radius * 0.38))), 0.48, -1)
+        for px, py, puff_scale in ((0.46, -0.2, 0.62), (-0.42, 0.22, 0.58), (0.08, 0.4, 0.52)):
+            drift = np.sin(index * 0.2 + phase + px) * 2
+            spot = (int(round(center_x + px * radius + drift)), int(round(y + py * radius)))
+            puff = max(4, int(round(radius * puff_scale)))
+            cv2.circle(cover, spot, puff, 1.0, -1)
+            cv2.circle(lit, spot, max(3, int(round(puff * 0.86))), 0.88, -1)
+            cv2.circle(heart, spot, max(2, int(round(puff * 0.3))), 0.36, -1)
     for n in range(5):
         phase = n * 1.4
         rise = (index * 2.4 + n * 24.0) % 130.0
@@ -303,8 +304,8 @@ def add_flames(frame, index, billow):
         center = (int(round(x)), int(round(y)))
         cv2.circle(heart, center, max(4, int(round(radius))), float(amount), -1)
         cv2.circle(lit, center, max(5, int(round(radius * 1.15))), 1.0, -1)
-    cover = cv2.GaussianBlur(cover, (31, 31), 8.0)
-    lit = cv2.GaussianBlur(lit, (21, 21), 5.0)
+    cover = cv2.GaussianBlur(cover, (15, 15), 3.6)
+    lit = cv2.GaussianBlur(lit, (11, 11), 2.4)
     heart = cv2.GaussianBlur(heart, (15, 15), 3.5)
     cover = np.clip(cover, 0, 1)
     lit = np.clip(lit, 0, 1) * cover
