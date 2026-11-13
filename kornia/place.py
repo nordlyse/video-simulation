@@ -600,14 +600,15 @@ def lava_limbs(width, height):
             room = max(18.0, low_y - 8 - float(end[1]))
             tip_len = min(length * keep, room / max(float(tip[1]), 0.3))
             tip_w = max(0.7, start_w * width_ratio)
+            end_ratio = 1.7 if low else 0.4
             c0 = end
             c1 = end + tip * tip_len * 0.34
             c2 = end + tip * tip_len * 0.7 + np.array([-normal[0] * 3.0, 8.0], np.float32)
             c3 = end + tip * tip_len
-            add(c0, c1, c2, c3, tip_w, max(0.4, tip_w * 0.35), phase + slot * 0.6, True)
+            add(c0, c1, c2, c3, tip_w, max(0.4, tip_w * end_ratio), phase + slot * 0.6, not low)
 
     trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
-    add(*trunk, 18, 3.2, 0.2, False)
+    add(*trunk, 14, 10, 0.2, False)
     grow(trunk, 0.14, 240, 7.0, 0.3, -1, False)
     grow(trunk, 0.24, 190, 5.0, 1.35, 1, False)
     grow(trunk, 0.38, 220, 4.6, 0.55, -1, True)
@@ -622,8 +623,8 @@ def lava_limbs(width, height):
     def foot_run(mark, side, phase, length, width):
         """A thin channel that opens across the lower slope and stops at the foot."""
         origin = _bezier_at(*trunk, mark)
-        droop = 0.78 + 0.16 * abs(float(np.sin(phase)))
-        reach = 1.2 + 0.45 * abs(float(np.sin(phase * 1.4)))
+        droop = 0.92 + 0.2 * abs(float(np.sin(phase)))
+        reach = 0.7 + 0.38 * abs(float(np.sin(phase * 1.4)))
         direction = _unit(np.array([side * reach, droop], np.float32))
         room = max(16.0, low_y - 10 - float(origin[1]))
         travel = min(float(length), room / max(float(direction[1]), 0.28))
@@ -632,7 +633,7 @@ def lava_limbs(width, height):
         p1 = origin + direction * travel * 0.3 + np.array([side * 14.0, 8.0], np.float32)
         p2 = origin + direction * travel * 0.68 + bow
         p3 = origin + direction * travel
-        add(p0, p1, p2, p3, width, max(0.35, width * 0.25), phase, True)
+        add(p0, p1, p2, p3, width, width * 4.2, phase, False)
 
     for mark, side, phase, length, width in (
         (0.58, -1, 0.2, 280, 2.2),
@@ -706,6 +707,12 @@ def flow_wave(y, index):
     return float(np.sin((float(y) - index * 0.75) * 0.02))
 
 
+def downhill_gain(y):
+    """Streams stay narrow under the crater and open as they run down the slope."""
+    down = np.clip((float(y) - 250.0) / (BASE_Y - 250.0), 0.0, 1.0)
+    return 1.0 + 1.7 * (down ** 1.15)
+
+
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
     """A smooth limb. Shift moves the lit side toward the upper light."""
     left = []
@@ -715,11 +722,13 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         t = float(progress[i])
         ease = t * t * (3 - 2 * t)
         width = start_w + (end_w - start_w) * ease
-        if pinch and t > 0.7:
+        if pinch and t > 0.7 and end_w < start_w:
             width *= (1.0 - t) / 0.3
         wave = flow_wave(pos[i, 1], index)
         lump = 0.5 + 0.5 * np.sin(t * 6.2 + phase + float(pos[i, 1]) * 0.02)
-        width *= 0.8 + 0.28 * lump + 0.12 * max(0.0, wave)
+        grow = 0.78 + 0.22 * max(0.0, wave) if end_w > start_w else 1.0
+        width *= (0.8 + 0.28 * lump + 0.12 * max(0.0, wave)) * grow * downhill_gain(pos[i, 1])
+        width = min(width, 6.0 + 9.0 * np.clip((float(pos[i, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -745,9 +754,13 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
             t = float(progress[k])
             ease = t * t * (3 - 2 * t)
             width = start_w + (end_w - start_w) * ease
-            if pinch and t > 0.7:
+            if pinch and t > 0.7 and end_w < start_w:
                 width *= (1.0 - t) / 0.3
             wave = max(0.0, flow_wave(pos[k, 1], index))
+            if end_w > start_w:
+                width *= 0.78 + 0.22 * wave
+            width *= downhill_gain(pos[k, 1])
+            width = min(width, 6.0 + 9.0 * np.clip((float(pos[k, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
             heat = wave * wave * (3 - 2 * wave)
             half = max(0.3, width * (0.18 + 0.28 * heat))
             px = -float(tangent[k, 1])
@@ -763,7 +776,7 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
 
 
 def paint_channels(frame, index):
-    """Slow lava runs from the trunk into thinner forks on the lower slope."""
+    """Slow lava leaves the crater, spreads downhill, and grows wider as it descends."""
     body = np.zeros(frame.shape[:2], np.uint8)
     lit = np.zeros(frame.shape[:2], np.uint8)
     glow = np.zeros(frame.shape[:2], np.uint8)
