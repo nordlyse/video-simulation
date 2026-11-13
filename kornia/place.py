@@ -250,56 +250,69 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """Hot lava boils upward as a column of soft cloud lobes."""
-    glow = np.zeros((HEIGHT, WIDTH), np.float32)
-    heat = np.zeros((HEIGHT, WIDTH), np.float32)
+    """Lava above the crater gathers into clouds. Hotter lava rises into them."""
+    cover = np.zeros((HEIGHT, WIDTH), np.float32)
+    lit = np.zeros((HEIGHT, WIDTH), np.float32)
+    heart = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
-    for lobe in range(6):
-        phase = lobe * 1.7
-        lift = (index * 1.5 + lobe * 9.0) % 34.0
-        y = cy - 4 - lobe * 26 - lift
+    for lobe in range(5):
+        phase = lobe * 1.9
+        lift = (index * 1.1 + lobe * 11.0) % 28.0
+        y = cy - 22 - lobe * 18 - lift
+        if y < 10:
+            continue
+        sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
+        sample_x = int(np.clip(round(cx), 0, WIDTH - 1))
+        grain = float(billow[sample_y, sample_x])
+        radius = (34 + 12 * grain) * (0.92 + 0.1 * np.sin(phase))
+        amount = 1.0
+        center_x = cx + np.sin(index * 0.16 + phase) * 14
+        center = (int(round(center_x)), int(round(y)))
+        cv2.circle(cover, center, max(8, int(round(radius))), amount, -1)
+        cv2.circle(lit, center, max(6, int(round(radius * 0.9))), 0.95, -1)
+        cv2.circle(heart, center, max(4, int(round(radius * 0.4))), 0.5, -1)
+        for ox, oy, scale in (
+            (0.42, -0.12, 0.78),
+            (-0.4, 0.14, 0.74),
+            (0.12, 0.32, 0.7),
+            (-0.16, -0.28, 0.72),
+        ):
+            drift = np.sin(index * 0.22 + phase + ox) * 3
+            spot = (int(round(center_x + ox * radius + drift)), int(round(y + oy * radius)))
+            puff = max(5, int(round(radius * scale)))
+            cv2.circle(cover, spot, puff, amount, -1)
+            cv2.circle(lit, spot, max(4, int(round(puff * 0.88))), 0.9, -1)
+            cv2.circle(heart, spot, max(3, int(round(puff * 0.32))), 0.4, -1)
+    for n in range(5):
+        phase = n * 1.4
+        rise = (index * 2.4 + n * 24.0) % 130.0
+        y = cy + 4 - rise
         if y < 8:
             continue
-        height_t = np.clip((cy - y) / 170.0, 0.0, 1.0)
+        fade = (1.0 - rise / 130.0) ** 0.75
+        x = cx + np.sin(phase + index * 0.18) * (8 + rise * 0.08)
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
-        sample_x = int(np.clip(round(cx + np.sin(phase) * 12), 0, WIDTH - 1))
+        sample_x = int(np.clip(round(x), 0, WIDTH - 1))
         grain = float(billow[sample_y, sample_x])
-        swell = 0.75 + 0.7 * np.sin(min(height_t, 1.0) * np.pi)
-        body = swell * (0.82 + 0.28 * grain)
-        radius = (20 + 16 * swell) * (0.85 + 0.25 * grain)
-        amount = 0.72 * body
-        spread = radius * 0.62
-        center = (int(round(cx + np.sin(index * 0.2 + phase) * 5)), int(round(y)))
-        cv2.circle(glow, center, max(4, int(round(radius))), float(amount), -1)
-        cv2.circle(heat, center, max(3, int(round(radius * 0.58))), float(amount), -1)
-        lumps = (
-            (0.7, -0.2, 0.78),
-            (-0.75, 0.15, 0.74),
-            (0.25, 0.55, 0.66),
-            (-0.3, -0.5, 0.7),
-            (1.05, 0.35, 0.5),
-            (-1.0, -0.28, 0.48),
-        )
-        for ox, oy, scale in lumps:
-            drift = np.sin(index * 0.25 + phase + ox) * 3
-            px = center[0] + ox * spread + drift
-            py = y + oy * spread * 0.75
-            spot = (int(round(px)), int(round(py)))
-            puff_r = radius * scale
-            cv2.circle(glow, spot, max(3, int(round(puff_r))), float(amount * 0.9), -1)
-            if height_t < 0.8:
-                cv2.circle(heat, spot, max(2, int(round(puff_r * 0.42))), float(amount * 0.75), -1)
-    glow = cv2.GaussianBlur(glow, (35, 35), 9.0)
-    heat = cv2.GaussianBlur(heat, (21, 21), 5.0)
-    glow = np.clip(glow, 0, 1)
-    heat = np.clip(heat, 0, 1)
-    lava = np.array([10, 70, 230], np.float32)
-    molten = np.array([36, 180, 255], np.float32)
-    white = np.array([200, 248, 255], np.float32)
-    fire = glow[..., None] * lava * 0.8 + np.clip(glow * 1.25, 0, 1)[..., None] * molten * 0.95
-    fire = fire + heat[..., None] * white * 1.15
+        radius = (12 + 10 * fade) * (0.85 + 0.3 * grain)
+        amount = 1.0 * fade
+        center = (int(round(x)), int(round(y)))
+        cv2.circle(heart, center, max(4, int(round(radius))), float(amount), -1)
+        cv2.circle(lit, center, max(5, int(round(radius * 1.15))), 1.0, -1)
+    cover = cv2.GaussianBlur(cover, (31, 31), 8.0)
+    lit = cv2.GaussianBlur(lit, (21, 21), 5.0)
+    heart = cv2.GaussianBlur(heart, (15, 15), 3.5)
+    cover = np.clip(cover, 0, 1)
+    lit = np.clip(lit, 0, 1) * cover
+    heart = np.clip(heart, 0, 1) * cover
+    crust = np.array([6, 12, 42], np.float32)
+    mid = np.array([10, 40, 110], np.float32)
+    core = np.array([96, 196, 255], np.float32)
+    color = crust * (1 - lit)[..., None] + mid * lit[..., None]
+    color = color * (1 - heart)[..., None] + core * heart[..., None]
+    alpha = cover[..., None]
     base = frame.astype(np.float32)
-    frame[:] = np.clip(base + fire, 0, 255).astype(np.uint8)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
 def cone_lip(x):
