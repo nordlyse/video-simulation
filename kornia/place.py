@@ -251,15 +251,24 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """One lava cloud rises from the crater and widens at the top. Hotter lava rises into it."""
+    """A hot jet leaves the crater, then opens into one cloud that widens above it."""
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     lit = np.zeros((HEIGHT, WIDTH), np.float32)
     heart = np.zeros((HEIGHT, WIDTH), np.float32)
     cx, cy = float(CRATER[0]), float(CRATER[1])
+    throw = 86.0
+    for step in range(9):
+        t = step / 8.0
+        y = cy + 2 - t * throw
+        radius = 11 + 16 * t
+        center = (int(round(cx + np.sin(index * 0.3 + t * 4) * 3)), int(round(y)))
+        cv2.circle(cover, center, max(5, int(round(radius))), 1.0, -1)
+        cv2.circle(lit, center, max(4, int(round(radius * 0.85))), 1.0, -1)
+        cv2.circle(heart, center, max(3, int(round(radius * 0.55))), 0.9, -1)
     for lobe in range(5):
         phase = lobe * 1.9
         lift = (index * 1.1 + lobe * 11.0) % 28.0
-        y = cy - 22 - lobe * 18 - lift
+        y = cy - throw - lobe * 16 - lift
         if y < 10:
             continue
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
@@ -290,11 +299,11 @@ def add_flames(frame, index, billow):
             cv2.circle(heart, spot, max(3, int(round(puff * 0.32))), 0.4, -1)
     for n in range(5):
         phase = n * 1.4
-        rise = (index * 2.4 + n * 24.0) % 130.0
+        rise = (index * 2.4 + n * 24.0) % 168.0
         y = cy + 4 - rise
         if y < 8:
             continue
-        fade = (1.0 - rise / 130.0) ** 0.75
+        fade = (1.0 - rise / 168.0) ** 0.75
         x = cx + np.sin(phase + index * 0.18) * (8 + rise * 0.08)
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
         sample_x = int(np.clip(round(x), 0, WIDTH - 1))
