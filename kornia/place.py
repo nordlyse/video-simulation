@@ -20,7 +20,8 @@ FPS = 12
 FRAMES = FPS * 6
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
-CRATER = (498, 184)
+FLOW_Y = float(HEIGHT - 1)
+CRATER = (500, 156)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
 
@@ -196,17 +197,15 @@ def sway_grass(frame, index):
 
 
 def add_crater(frame, index):
-    """A lava lake in the summit. The near lip is bright and the far lip is dark."""
+    """A vent cut into the tip. Lava leaves through the top of the cone."""
     pulse = 0.85 + 0.15 * np.sin(index * 0.65)
-    rim = (CRATER[0], CRATER[1] - 2)
-    cv2.ellipse(frame, rim, (40, 14), 0, 0, 360, (48, 52, 58), -1)
-    cv2.ellipse(frame, CRATER, (30, 10), 0, 0, 360, (8, 6, 10), -1)
-    lake = (CRATER[0], CRATER[1] + 3)
+    mouth = (int(APEX[0]), int(APEX[1]))
+    cv2.ellipse(frame, mouth, (20, 9), 0, 0, 180, (42, 40, 46), -1)
+    cv2.ellipse(frame, mouth, (13, 6), 0, 0, 180, (8, 6, 10), -1)
     orange = (int(20 * pulse), int(80 * pulse), int(220 * pulse))
-    cv2.ellipse(frame, lake, (24, 8), 0, 0, 360, orange, -1)
-    cv2.ellipse(frame, (CRATER[0], CRATER[1] - 1), (24, 7), 0, 0, 360, (8, 6, 10), -1)
+    cv2.ellipse(frame, mouth, (9, 4), 0, 10, 170, orange, -1)
     glow = np.zeros_like(frame, np.float32)
-    cv2.ellipse(glow, lake, (28, 10), 0, 0, 360, (16, 70, 200), -1)
+    cv2.ellipse(glow, mouth, (16, 8), 0, 0, 180, (16, 70, 200), -1)
     glow = cv2.GaussianBlur(glow, (21, 21), 5)
     frame[:] = np.clip(frame.astype(np.float32) + glow * 0.35, 0, 255).astype(np.uint8)
 
@@ -250,15 +249,24 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """One lava cloud rises from the crater and widens at the top. Hotter lava rises into it."""
+    """A hot jet leaves the summit, as if from inside the cone, then opens into a cloud."""
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     lit = np.zeros((HEIGHT, WIDTH), np.float32)
     heart = np.zeros((HEIGHT, WIDTH), np.float32)
-    cx, cy = float(CRATER[0]), float(CRATER[1])
+    cx, cy = float(APEX[0]), float(APEX[1])
+    throw = 86.0
+    for step in range(9):
+        t = step / 8.0
+        y = cy - t * throw
+        radius = 8 + 16 * t
+        center = (int(round(cx + np.sin(index * 0.3 + t * 4) * 3)), int(round(y)))
+        cv2.circle(cover, center, max(5, int(round(radius))), 1.0, -1)
+        cv2.circle(lit, center, max(4, int(round(radius * 0.85))), 1.0, -1)
+        cv2.circle(heart, center, max(3, int(round(radius * 0.55))), 0.9, -1)
     for lobe in range(5):
         phase = lobe * 1.9
         lift = (index * 1.1 + lobe * 11.0) % 28.0
-        y = cy - 22 - lobe * 18 - lift
+        y = cy - throw - lobe * 16 - lift
         if y < 10:
             continue
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
@@ -289,11 +297,11 @@ def add_flames(frame, index, billow):
             cv2.circle(heart, spot, max(3, int(round(puff * 0.32))), 0.4, -1)
     for n in range(5):
         phase = n * 1.4
-        rise = (index * 2.4 + n * 24.0) % 130.0
+        rise = (index * 2.4 + n * 24.0) % 168.0
         y = cy + 4 - rise
         if y < 8:
             continue
-        fade = (1.0 - rise / 130.0) ** 0.75
+        fade = (1.0 - rise / 168.0) ** 0.75
         x = cx + np.sin(phase + index * 0.18) * (8 + rise * 0.08)
         sample_y = int(np.clip(round(y), 0, HEIGHT - 1))
         sample_x = int(np.clip(round(x), 0, WIDTH - 1))
@@ -524,10 +532,10 @@ def _pull_back(points, pixels):
 
 
 def lava_limbs(width, height):
-    """A trunk that fans down the cone and stops where the slope meets the ground."""
+    """A trunk that fans down the cone and continues to the bottom of the frame."""
     scale = np.array([width, height], np.float32)
     center_x = 0.49 * width
-    low_y = BASE_Y - 2
+    low_y = FLOW_Y
 
     def at(x, y):
         return np.array([x, y], np.float32) * scale
@@ -535,11 +543,18 @@ def lava_limbs(width, height):
     limbs = []
 
     def hold(points):
-        """Keep each step downhill, and stop at the foot of the cone."""
+        """Keep each step downhill, and stop at the bottom of the frame."""
         held = []
         for point in points:
             y = min(float(point[1]), low_y)
             x = float(point[0])
+            if held:
+                prev_x = float(held[-1][0])
+                prev_y = float(held[-1][1])
+                drop = max(0.0, y - prev_y)
+                if drop < 10.0:
+                    limit = max(5.0, drop * 1.15)
+                    x = prev_x + float(np.clip(x - prev_x, -limit, limit))
             if held and y < float(held[-1][1]) + 1.5:
                 y = min(float(held[-1][1]) + 1.5, low_y)
             if held and float(held[-1][1]) >= low_y - 1.0:
@@ -637,7 +652,7 @@ def lava_limbs(width, height):
             c3 = end + tip * tip_len
             add(c0, c1, c2, c3, tip_w, max(0.4, tip_w * end_ratio), phase + slot * 0.6, not low)
 
-    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
+    trunk = (at(0.518, 0.30), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
     add(*trunk, 14, 10, 0.2, False)
     grow(trunk, 0.14, 240, 7.0, 0.3, -1, False)
     grow(trunk, 0.24, 190, 5.0, 1.35, 1, False)
@@ -651,12 +666,12 @@ def lava_limbs(width, height):
     side_twig(*trunk, 0.78, 90, 1.8, 1.6, 0.16, 1)
 
     def foot_run(mark, side, phase, length, width):
-        """A thin channel that opens across the lower slope and stops at the foot."""
+        """A channel that opens across the lower slope and continues into the grass."""
         origin = _bezier_at(*trunk, mark)
-        droop = 0.92 + 0.2 * abs(float(np.sin(phase)))
-        reach = 0.7 + 0.38 * abs(float(np.sin(phase * 1.4)))
+        droop = 1.2 + 0.16 * abs(float(np.sin(phase)))
+        reach = 0.72 + 0.28 * abs(float(np.sin(phase * 1.4)))
         direction = _unit(np.array([side * reach, droop], np.float32))
-        room = max(16.0, low_y - 10 - float(origin[1]))
+        room = max(16.0, low_y - 1 - float(origin[1]))
         travel = min(float(length), room / max(float(direction[1]), 0.28))
         bow = np.array([side * 22.0, 16.0], np.float32)
         p0 = origin
@@ -713,7 +728,7 @@ def meander(pos, index):
     for i in range(len(out)):
         out[i, 0] += drift_x(float(out[i, 1]), index)
     for i in range(1, len(out)):
-        floor = BASE_Y - 2
+        floor = FLOW_Y
         if out[i, 1] < out[i - 1, 1] + 0.4:
             out[i, 1] = min(out[i - 1, 1] + 0.4, floor)
         if out[i, 1] > floor:
@@ -739,7 +754,7 @@ def flow_wave(y, index):
 
 def downhill_gain(y):
     """Streams stay narrow under the crater and open as they run down the slope."""
-    down = np.clip((float(y) - 250.0) / (BASE_Y - 250.0), 0.0, 1.0)
+    down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
     return 1.0 + 1.7 * (down ** 1.15)
 
 
@@ -758,7 +773,7 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         lump = 0.5 + 0.5 * np.sin(t * 6.2 + phase + float(pos[i, 1]) * 0.02)
         grow = 0.78 + 0.22 * max(0.0, wave) if end_w > start_w else 1.0
         width *= (0.8 + 0.28 * lump + 0.12 * max(0.0, wave)) * grow * downhill_gain(pos[i, 1])
-        width = min(width, 6.0 + 9.0 * np.clip((float(pos[i, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
+        width = min(width, 6.0 + 11.0 * np.clip((float(pos[i, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -790,7 +805,7 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
             if end_w > start_w:
                 width *= 0.78 + 0.22 * wave
             width *= downhill_gain(pos[k, 1])
-            width = min(width, 6.0 + 9.0 * np.clip((float(pos[k, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
+            width = min(width, 6.0 + 11.0 * np.clip((float(pos[k, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
             heat = wave * wave * (3 - 2 * wave)
             half = max(0.3, width * (0.18 + 0.28 * heat))
             px = -float(tangent[k, 1])
