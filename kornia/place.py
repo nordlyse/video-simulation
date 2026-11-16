@@ -21,7 +21,7 @@ FRAMES = FPS * 6
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
 FLOW_Y = float(HEIGHT - 1)
-CRATER = (498, 184)
+CRATER = (500, 156)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
 
@@ -197,17 +197,15 @@ def sway_grass(frame, index):
 
 
 def add_crater(frame, index):
-    """A lava lake in the summit. The near lip is bright and the far lip is dark."""
+    """A vent cut into the tip. Lava leaves through the top of the cone."""
     pulse = 0.85 + 0.15 * np.sin(index * 0.65)
-    rim = (CRATER[0], CRATER[1] - 2)
-    cv2.ellipse(frame, rim, (40, 14), 0, 0, 360, (48, 52, 58), -1)
-    cv2.ellipse(frame, CRATER, (30, 10), 0, 0, 360, (8, 6, 10), -1)
-    lake = (CRATER[0], CRATER[1] + 3)
+    mouth = (int(APEX[0]), int(APEX[1]))
+    cv2.ellipse(frame, mouth, (20, 9), 0, 0, 180, (42, 40, 46), -1)
+    cv2.ellipse(frame, mouth, (13, 6), 0, 0, 180, (8, 6, 10), -1)
     orange = (int(20 * pulse), int(80 * pulse), int(220 * pulse))
-    cv2.ellipse(frame, lake, (24, 8), 0, 0, 360, orange, -1)
-    cv2.ellipse(frame, (CRATER[0], CRATER[1] - 1), (24, 7), 0, 0, 360, (8, 6, 10), -1)
+    cv2.ellipse(frame, mouth, (9, 4), 0, 10, 170, orange, -1)
     glow = np.zeros_like(frame, np.float32)
-    cv2.ellipse(glow, lake, (28, 10), 0, 0, 360, (16, 70, 200), -1)
+    cv2.ellipse(glow, mouth, (16, 8), 0, 0, 180, (16, 70, 200), -1)
     glow = cv2.GaussianBlur(glow, (21, 21), 5)
     frame[:] = np.clip(frame.astype(np.float32) + glow * 0.35, 0, 255).astype(np.uint8)
 
@@ -251,16 +249,16 @@ def add_clouds(frame, index):
 
 
 def add_flames(frame, index, billow):
-    """A hot jet leaves the crater, then opens into one cloud that widens above it."""
+    """A hot jet leaves the summit, as if from inside the cone, then opens into a cloud."""
     cover = np.zeros((HEIGHT, WIDTH), np.float32)
     lit = np.zeros((HEIGHT, WIDTH), np.float32)
     heart = np.zeros((HEIGHT, WIDTH), np.float32)
-    cx, cy = float(CRATER[0]), float(CRATER[1])
+    cx, cy = float(APEX[0]), float(APEX[1])
     throw = 86.0
     for step in range(9):
         t = step / 8.0
-        y = cy + 2 - t * throw
-        radius = 11 + 16 * t
+        y = cy - t * throw
+        radius = 8 + 16 * t
         center = (int(round(cx + np.sin(index * 0.3 + t * 4) * 3)), int(round(y)))
         cv2.circle(cover, center, max(5, int(round(radius))), 1.0, -1)
         cv2.circle(lit, center, max(4, int(round(radius * 0.85))), 1.0, -1)
@@ -654,7 +652,7 @@ def lava_limbs(width, height):
             c3 = end + tip * tip_len
             add(c0, c1, c2, c3, tip_w, max(0.4, tip_w * end_ratio), phase + slot * 0.6, not low)
 
-    trunk = (at(0.518, 0.348), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
+    trunk = (at(0.518, 0.30), at(0.508, 0.50), at(0.496, 0.68), at(0.49, 0.84))
     add(*trunk, 14, 10, 0.2, False)
     grow(trunk, 0.14, 240, 7.0, 0.3, -1, False)
     grow(trunk, 0.24, 190, 5.0, 1.35, 1, False)
