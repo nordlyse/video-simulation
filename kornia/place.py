@@ -20,7 +20,7 @@ FPS = 12
 FRAMES = FPS * 6
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
-FLOW_Y = 516.0
+FLOW_Y = float(HEIGHT - 1)
 CRATER = (498, 184)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
@@ -525,7 +525,7 @@ def _pull_back(points, pixels):
 
 
 def lava_limbs(width, height):
-    """A trunk that fans down the cone and runs a little way into the grass."""
+    """A trunk that fans down the cone and continues to the bottom of the frame."""
     scale = np.array([width, height], np.float32)
     center_x = 0.49 * width
     low_y = FLOW_Y
@@ -536,7 +536,7 @@ def lava_limbs(width, height):
     limbs = []
 
     def hold(points):
-        """Keep each step downhill, and stop once the flow is in the grass."""
+        """Keep each step downhill, and stop at the bottom of the frame."""
         held = []
         for point in points:
             y = min(float(point[1]), low_y)
@@ -664,7 +664,7 @@ def lava_limbs(width, height):
         droop = 1.2 + 0.16 * abs(float(np.sin(phase)))
         reach = 0.72 + 0.28 * abs(float(np.sin(phase * 1.4)))
         direction = _unit(np.array([side * reach, droop], np.float32))
-        room = max(16.0, low_y - 10 - float(origin[1]))
+        room = max(16.0, low_y - 1 - float(origin[1]))
         travel = min(float(length), room / max(float(direction[1]), 0.28))
         bow = np.array([side * 22.0, 16.0], np.float32)
         p0 = origin
