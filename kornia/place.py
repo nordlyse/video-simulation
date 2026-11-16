@@ -20,6 +20,7 @@ FPS = 12
 FRAMES = FPS * 6
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
+FLOW_Y = 516.0
 CRATER = (498, 184)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
@@ -524,10 +525,10 @@ def _pull_back(points, pixels):
 
 
 def lava_limbs(width, height):
-    """A trunk that fans down the cone and stops where the slope meets the ground."""
+    """A trunk that fans down the cone and runs a little way into the grass."""
     scale = np.array([width, height], np.float32)
     center_x = 0.49 * width
-    low_y = BASE_Y - 2
+    low_y = FLOW_Y
 
     def at(x, y):
         return np.array([x, y], np.float32) * scale
@@ -535,11 +536,18 @@ def lava_limbs(width, height):
     limbs = []
 
     def hold(points):
-        """Keep each step downhill, and stop at the foot of the cone."""
+        """Keep each step downhill, and stop once the flow is in the grass."""
         held = []
         for point in points:
             y = min(float(point[1]), low_y)
             x = float(point[0])
+            if held:
+                prev_x = float(held[-1][0])
+                prev_y = float(held[-1][1])
+                drop = max(0.0, y - prev_y)
+                if drop < 10.0:
+                    limit = max(5.0, drop * 1.15)
+                    x = prev_x + float(np.clip(x - prev_x, -limit, limit))
             if held and y < float(held[-1][1]) + 1.5:
                 y = min(float(held[-1][1]) + 1.5, low_y)
             if held and float(held[-1][1]) >= low_y - 1.0:
@@ -651,10 +659,10 @@ def lava_limbs(width, height):
     side_twig(*trunk, 0.78, 90, 1.8, 1.6, 0.16, 1)
 
     def foot_run(mark, side, phase, length, width):
-        """A thin channel that opens across the lower slope and stops at the foot."""
+        """A channel that opens across the lower slope and continues into the grass."""
         origin = _bezier_at(*trunk, mark)
-        droop = 0.92 + 0.2 * abs(float(np.sin(phase)))
-        reach = 0.7 + 0.38 * abs(float(np.sin(phase * 1.4)))
+        droop = 1.2 + 0.16 * abs(float(np.sin(phase)))
+        reach = 0.72 + 0.28 * abs(float(np.sin(phase * 1.4)))
         direction = _unit(np.array([side * reach, droop], np.float32))
         room = max(16.0, low_y - 10 - float(origin[1]))
         travel = min(float(length), room / max(float(direction[1]), 0.28))
@@ -713,7 +721,7 @@ def meander(pos, index):
     for i in range(len(out)):
         out[i, 0] += drift_x(float(out[i, 1]), index)
     for i in range(1, len(out)):
-        floor = BASE_Y - 2
+        floor = FLOW_Y
         if out[i, 1] < out[i - 1, 1] + 0.4:
             out[i, 1] = min(out[i - 1, 1] + 0.4, floor)
         if out[i, 1] > floor:
@@ -739,7 +747,7 @@ def flow_wave(y, index):
 
 def downhill_gain(y):
     """Streams stay narrow under the crater and open as they run down the slope."""
-    down = np.clip((float(y) - 250.0) / (BASE_Y - 250.0), 0.0, 1.0)
+    down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
     return 1.0 + 1.7 * (down ** 1.15)
 
 
@@ -758,7 +766,7 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         lump = 0.5 + 0.5 * np.sin(t * 6.2 + phase + float(pos[i, 1]) * 0.02)
         grow = 0.78 + 0.22 * max(0.0, wave) if end_w > start_w else 1.0
         width *= (0.8 + 0.28 * lump + 0.12 * max(0.0, wave)) * grow * downhill_gain(pos[i, 1])
-        width = min(width, 6.0 + 9.0 * np.clip((float(pos[i, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
+        width = min(width, 6.0 + 11.0 * np.clip((float(pos[i, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -790,7 +798,7 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
             if end_w > start_w:
                 width *= 0.78 + 0.22 * wave
             width *= downhill_gain(pos[k, 1])
-            width = min(width, 6.0 + 9.0 * np.clip((float(pos[k, 1]) - 250.0) / (BASE_Y - 250.0), 0, 1))
+            width = min(width, 6.0 + 11.0 * np.clip((float(pos[k, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
             heat = wave * wave * (3 - 2 * wave)
             half = max(0.3, width * (0.18 + 0.28 * heat))
             px = -float(tangent[k, 1])
