@@ -875,8 +875,8 @@ def add_contact_shadow(frame, x, y, width, height):
     frame[y0:y1, x0:x1] = np.clip(roi * (1 - shade * 0.55), 0, 255).astype(np.uint8)
 
 
-def melt_face(sprite, heat, index):
-    """Sag the face farther where lava touches it, and let that melt run downward."""
+def melt_body(sprite, heat, index):
+    """Sag whichever side the lava touches, on the face and the rest of the body."""
     amount = float(np.clip((index - 6) / 30.0, 0, 1))
     if amount < 0.05:
         return sprite
@@ -888,16 +888,19 @@ def melt_face(sprite, heat, index):
         touch[:band, :span] = np.clip(heat[:band, :span], 0, 1)
     touch = np.clip((touch - 0.08) / 0.34, 0, 1)
     touch = cv2.GaussianBlur(touch, (0, 0), 3.4, 2.1)
+    body = np.clip(sprite[:, :, 3].astype(np.float32) / 255.0, 0, 1)
+    body = np.clip(cv2.GaussianBlur(body, (0, 0), 1.2), 0, 1)
     rows = np.linspace(0, 1, height, dtype=np.float32)[:, None]
     side = np.linspace(1.0, 0.2, width, dtype=np.float32)[None, :]
     on_face = np.clip((0.68 - rows) / 0.24, 0, 1)
-    contact = touch * on_face
-    soft = side * np.clip((rows - 0.02) / 0.3, 0, 1) * on_face * (0.58 * amount)
+    contact = touch * body
+    soft = side * np.clip((rows - 0.02) / 0.3, 0, 1) * on_face * body * (0.58 * amount)
     source = np.clip(soft + contact * (0.4 + 1.25 * amount), 0, 1)
     flow = source.copy()
     for row in range(1, height):
         flow[row] = np.maximum(source[row], flow[row - 1] * 0.94)
     flow = cv2.GaussianBlur(flow, (0, 0), 1.4, 0.6)
+    flow = np.clip(flow * np.clip(body * 1.3, 0, 1), 0, 1)
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     shift = (flow * (20 + 74 * amount)).astype(np.float32)
     lean = (flow * (5 + 14 * amount) * side).astype(np.float32)
@@ -1016,7 +1019,7 @@ def compose_frame(index, sprite, lobe_field, backdrop):
             bleed = max(6, sh // 8)
             fade = np.linspace(1.0, 0.35, bleed, dtype=np.float32)[:, None]
             face_heat[:bleed] = np.maximum(face_heat[:bleed], arriving[None, :] * fade)
-        placed = paste_person(frame, shade_sprite(melt_face(sprite, face_heat, index), near))
+        placed = paste_person(frame, shade_sprite(melt_body(sprite, face_heat, index), near))
     return frame, placed
 
 
