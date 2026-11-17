@@ -875,6 +875,32 @@ def add_contact_shadow(frame, x, y, width, height):
     frame[y0:y1, x0:x1] = np.clip(roi * (1 - shade * 0.55), 0, 255).astype(np.uint8)
 
 
+def melt_face(sprite, reach, index):
+    """Sag the face into drips once downhill lava comes toward it."""
+    amount = float(np.clip(reach, 0, 1)) * float(np.clip((index - 6) / 40.0, 0, 1))
+    if amount < 0.08:
+        return sprite
+    height, width = sprite.shape[:2]
+    rows = np.linspace(0, 1, height, dtype=np.float32)[:, None]
+    cols = np.linspace(1, 0.25, width, dtype=np.float32)[None, :]
+    face = np.clip((rows - 0.04) / 0.42, 0, 1) * np.clip((0.62 - rows) / 0.2, 0, 1)
+    drip = face * cols * amount
+    drip = cv2.GaussianBlur(drip, (0, 0), 5)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    shift = drip * (8 + 34 * amount)
+    map_x = np.clip(xx - drip * 8, 0, width - 1).astype(np.float32)
+    map_y = np.clip(yy - shift, 0, height - 1).astype(np.float32)
+    color = cv2.remap(sprite[:, :, :3], map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    alpha = cv2.remap(sprite[:, :, 3], map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    lava = np.array([14, 64, 200], np.float32)
+    tint = np.clip(drip * 1.35, 0, 0.7)[..., None]
+    mixed = np.clip(color.astype(np.float32) * (1 - tint) + lava * tint, 0, 255)
+    out = sprite.copy()
+    out[:, :, :3] = mixed.astype(np.uint8)
+    out[:, :, 3] = alpha
+    return out
+
+
 def shade_sprite(sprite, heat):
     """Warm the side toward the lava. The far side stays cooler."""
     height, width = sprite.shape[:2]
@@ -970,7 +996,9 @@ def compose_frame(index, sprite, lobe_field, backdrop):
             padded = np.zeros((sh, sw), np.float32)
             padded[: near.shape[0], : near.shape[1]] = near
             near = padded
-        placed = paste_person(frame, shade_sprite(sprite, near))
+        above = melt[max(0, sy - 80) : sy + int(sh * 0.5), max(0, sx - 70) : sx + sw]
+        reach = 0.0 if above.size == 0 else float(np.clip(above.mean() * 2.4 + above.max() * 0.45, 0, 1))
+        placed = paste_person(frame, shade_sprite(melt_face(sprite, reach, index), near))
     return frame, placed
 
 
