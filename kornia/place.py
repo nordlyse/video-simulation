@@ -643,7 +643,8 @@ def lava_limbs(width, height):
                 down,
             ], np.float32))
             room = max(18.0, low_y - 8 - float(end[1]))
-            tip_len = min(length * keep, room / max(float(tip[1]), 0.3))
+            extra = 44.0 if low else 0.0
+            tip_len = min(length * keep + extra, room / max(float(tip[1]), 0.3))
             tip_w = max(0.7, start_w * width_ratio)
             end_ratio = 1.7 if low else 0.4
             c0 = end
