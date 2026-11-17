@@ -643,7 +643,8 @@ def lava_limbs(width, height):
                 down,
             ], np.float32))
             room = max(18.0, low_y - 8 - float(end[1]))
-            tip_len = min(length * keep, room / max(float(tip[1]), 0.3))
+            extra = 44.0 if low else 0.0
+            tip_len = min(length * keep + extra, room / max(float(tip[1]), 0.3))
             tip_w = max(0.7, start_w * width_ratio)
             end_ratio = 1.7 if low else 0.4
             c0 = end
@@ -875,6 +876,48 @@ def add_contact_shadow(frame, x, y, width, height):
     frame[y0:y1, x0:x1] = np.clip(roi * (1 - shade * 0.55), 0, 255).astype(np.uint8)
 
 
+def melt_body(sprite, heat, index):
+    """Sag whichever side the lava touches, on the face and the rest of the body."""
+    amount = float(np.clip((index - 6) / 30.0, 0, 1))
+    if amount < 0.05:
+        return sprite
+    height, width = sprite.shape[:2]
+    touch = np.zeros((height, width), np.float32)
+    if heat is not None and heat.size:
+        band = min(height, heat.shape[0])
+        span = min(width, heat.shape[1])
+        touch[:band, :span] = np.clip(heat[:band, :span], 0, 1)
+    touch = np.clip((touch - 0.08) / 0.34, 0, 1)
+    touch = cv2.GaussianBlur(touch, (0, 0), 3.4, 2.1)
+    body = np.clip(sprite[:, :, 3].astype(np.float32) / 255.0, 0, 1)
+    body = np.clip(cv2.GaussianBlur(body, (0, 0), 1.2), 0, 1)
+    rows = np.linspace(0, 1, height, dtype=np.float32)[:, None]
+    side = np.linspace(1.0, 0.2, width, dtype=np.float32)[None, :]
+    on_face = np.clip((0.68 - rows) / 0.24, 0, 1)
+    contact = touch * body
+    soft = side * np.clip((rows - 0.02) / 0.3, 0, 1) * on_face * body * (0.58 * amount)
+    source = np.clip(soft + contact * (0.4 + 1.25 * amount), 0, 1)
+    flow = source.copy()
+    for row in range(1, height):
+        flow[row] = np.maximum(source[row], flow[row - 1] * 0.94)
+    flow = cv2.GaussianBlur(flow, (0, 0), 1.4, 0.6)
+    flow = np.clip(flow * np.clip(body * 1.3, 0, 1), 0, 1)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    shift = (flow * (20 + 74 * amount)).astype(np.float32)
+    lean = (flow * (5 + 14 * amount) * side).astype(np.float32)
+    map_x = np.clip(xx - lean, 0, width - 1).astype(np.float32)
+    map_y = np.clip(yy - shift, 0, height - 1).astype(np.float32)
+    color = cv2.remap(sprite[:, :, :3], map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    alpha = cv2.remap(sprite[:, :, 3], map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    lava = np.array([12, 58, 210], np.float32)
+    tint = np.clip(flow * 0.55 + contact * 0.7, 0, 0.88)[..., None]
+    mixed = np.clip(color.astype(np.float32) * (1 - tint) + lava * tint, 0, 255)
+    out = sprite.copy()
+    out[:, :, :3] = mixed.astype(np.uint8)
+    out[:, :, 3] = alpha
+    return out
+
+
 def shade_sprite(sprite, heat):
     """Warm the side toward the lava. The far side stays cooler."""
     height, width = sprite.shape[:2]
@@ -970,7 +1013,14 @@ def compose_frame(index, sprite, lobe_field, backdrop):
             padded = np.zeros((sh, sw), np.float32)
             padded[: near.shape[0], : near.shape[1]] = near
             near = padded
-        placed = paste_person(frame, shade_sprite(sprite, near))
+        face_heat = near.copy()
+        overhead = melt[max(0, sy - 48) : sy, sx : sx + sw]
+        if overhead.size and face_heat.shape[1] == overhead.shape[1]:
+            arriving = overhead.max(axis=0)
+            bleed = max(6, sh // 8)
+            fade = np.linspace(1.0, 0.35, bleed, dtype=np.float32)[:, None]
+            face_heat[:bleed] = np.maximum(face_heat[:bleed], arriving[None, :] * fade)
+        placed = paste_person(frame, shade_sprite(melt_body(sprite, face_heat, index), near))
     return frame, placed
 
 
