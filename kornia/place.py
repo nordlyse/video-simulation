@@ -17,7 +17,8 @@ preview_path = ready / "volcano.png"
 WIDTH = 960
 HEIGHT = 540
 FPS = 12
-FRAMES = FPS * 6
+CLIP_SECONDS = 8
+FRAMES = FPS * CLIP_SECONDS
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
 FLOW_Y = float(HEIGHT - 1)
@@ -222,8 +223,8 @@ def add_clouds(frame, index):
         (640, 158, 1.7),
     )
     span = WIDTH + 320
-    # One eighth of a pass per clip, so the drift stays smooth behind the lava.
-    speed = span / (FRAMES * 8)
+    # One eighth of a pass across six seconds, so a longer clip does not slow the drift.
+    speed = span / ((FPS * 6) * 8)
     for cx, cy, phase in banks:
         ox = (cx + 140 - index * speed) % span - 140
         for puff in range(7):
@@ -759,8 +760,9 @@ def flow_reach(index):
     """The downhill sheet starts at the summit and creeps toward the foot."""
     start = float(APEX[1]) + 4.0
     span = FLOW_Y - start
-    step = float(index) / float(max(FRAMES - 1, 1))
-    return start + span * step * 0.92
+    seconds = float(index) / float(FPS)
+    progress = min(1.0, (seconds / 6.0) * 0.92)
+    return start + span * progress
 
 
 def reveal_downhill(field, index):
