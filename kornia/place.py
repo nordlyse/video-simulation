@@ -760,7 +760,7 @@ def flow_reach(index):
     start = float(APEX[1]) + 4.0
     span = FLOW_Y - start
     step = float(index) / float(max(FRAMES - 1, 1))
-    return start + span * step * 0.62
+    return start + span * step * 0.92
 
 
 def reveal_downhill(field, index):
