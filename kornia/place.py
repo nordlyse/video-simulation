@@ -17,7 +17,8 @@ preview_path = ready / "volcano.png"
 WIDTH = 960
 HEIGHT = 540
 FPS = 12
-FRAMES = FPS * 6
+CLIP_SECONDS = 8
+FRAMES = FPS * CLIP_SECONDS
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
 FLOW_Y = float(HEIGHT - 1)
@@ -222,8 +223,8 @@ def add_clouds(frame, index):
         (640, 158, 1.7),
     )
     span = WIDTH + 320
-    # One eighth of a pass per clip, so the drift stays smooth behind the lava.
-    speed = span / (FRAMES * 8)
+    # One eighth of a pass across six seconds, so a longer clip does not slow the drift.
+    speed = span / ((FPS * 6) * 8)
     for cx, cy, phase in banks:
         ox = (cx + 140 - index * speed) % span - 140
         for puff in range(7):
@@ -490,6 +491,8 @@ def add_fountain(frame, index):
     cover = np.clip(np.maximum(crown, drop_cover * 1.2), 0, 1)
     heart = np.clip((core - 0.25) / 0.75, 0, 1) * np.clip(soft * 1.45, 0, 1)
     heart = np.clip(heart + drop_heart * 0.9, 0, 1)
+    cover = reveal_downhill(cover, index)
+    heart = reveal_downhill(heart, index)
     crust = np.array([14, 58, 150], np.float32)
     mid = np.array([26, 125, 235], np.float32)
     glow = np.array([110, 210, 255], np.float32)
@@ -753,6 +756,23 @@ def flow_wave(y, index):
     return float(np.sin((float(y) - index * 0.75) * 0.02))
 
 
+def flow_reach(index):
+    """The downhill sheet starts at the summit and creeps toward the foot."""
+    start = float(APEX[1]) + 4.0
+    span = FLOW_Y - start
+    seconds = float(index) / float(FPS)
+    progress = min(1.0, (seconds / 6.0) * 0.92)
+    return start + span * progress
+
+
+def reveal_downhill(field, index):
+    """Keep only the lava the sheet has reached, with a soft leading edge."""
+    front = flow_reach(index)
+    rows = np.arange(field.shape[0], dtype=np.float32)[:, None]
+    edge = np.clip((front - rows) / 32.0, 0.0, 1.0)
+    return field * edge
+
+
 def downhill_gain(y):
     """Streams stay narrow under the crater and open as they run down the slope."""
     down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
@@ -843,6 +863,9 @@ def paint_channels(frame, index):
     cover = np.clip(cover, 0, 1)
     light = np.clip(light, 0, 1) * cover
     heart = np.clip(heart, 0, 1) * cover
+    cover = reveal_downhill(cover, index)
+    light = reveal_downhill(light, index)
+    heart = reveal_downhill(heart, index)
     crust = np.array([6, 12, 42], np.float32)
     mid = np.array([10, 40, 110], np.float32)
     core = np.array([96, 196, 255], np.float32)
@@ -876,11 +899,8 @@ def add_contact_shadow(frame, x, y, width, height):
     frame[y0:y1, x0:x1] = np.clip(roi * (1 - shade * 0.55), 0, 255).astype(np.uint8)
 
 
-def melt_body(sprite, heat, index):
-    """Sag whichever side the lava touches, on the face and the rest of the body."""
-    amount = float(np.clip((index - 6) / 30.0, 0, 1))
-    if amount < 0.05:
-        return sprite
+def melt_body(sprite, heat, _index):
+    """Sag whichever side the lava touches, once the sheet has reached the body."""
     height, width = sprite.shape[:2]
     touch = np.zeros((height, width), np.float32)
     if heat is not None and heat.size:
@@ -891,6 +911,10 @@ def melt_body(sprite, heat, index):
     touch = cv2.GaussianBlur(touch, (0, 0), 3.4, 2.1)
     body = np.clip(sprite[:, :, 3].astype(np.float32) / 255.0, 0, 1)
     body = np.clip(cv2.GaussianBlur(body, (0, 0), 1.2), 0, 1)
+    arrived = float(np.clip((touch * body).max() if body.size else 0.0, 0, 1))
+    amount = float(np.clip((arrived - 0.08) / 0.4, 0, 1))
+    if amount < 0.05:
+        return sprite
     rows = np.linspace(0, 1, height, dtype=np.float32)[:, None]
     side = np.linspace(1.0, 0.2, width, dtype=np.float32)[None, :]
     on_face = np.clip((0.68 - rows) / 0.24, 0, 1)
