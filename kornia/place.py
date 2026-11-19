@@ -17,8 +17,11 @@ preview_path = ready / "volcano.png"
 WIDTH = 960
 HEIGHT = 540
 FPS = 12
-CLIP_SECONDS = 8
+CYCLE_SECONDS = 8
+CYCLES = 2
+CLIP_SECONDS = CYCLE_SECONDS * CYCLES
 FRAMES = FPS * CLIP_SECONDS
+CYCLE_FRAMES = FPS * CYCLE_SECONDS
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
 FLOW_Y = float(HEIGHT - 1)
@@ -757,11 +760,12 @@ def flow_wave(y, index):
 
 
 def flow_reach(index):
-    """The downhill sheet starts at the summit and creeps toward the foot."""
+    """The downhill sheet starts at the summit and creeps toward the foot, then the cycle begins again."""
     start = float(APEX[1]) + 4.0
     span = FLOW_Y - start
-    seconds = float(index) / float(FPS)
-    progress = min(1.0, (seconds / 6.0) * 0.92)
+    local = int(index) % CYCLE_FRAMES
+    seconds = float(local) / float(FPS)
+    progress = min(1.0, (seconds / 6.0) * 0.68)
     return start + span * progress
 
 
@@ -1060,6 +1064,10 @@ def main():
     placed = False
     try:
         for index in range(FRAMES):
+            if index % CYCLE_FRAMES == 0:
+                fresh = person_sprite(WIDTH, HEIGHT)
+                if fresh is not None:
+                    sprite = fresh
             frame, placed = compose_frame(index, sprite, lobe_field, backdrop)
             writer.write(frame)
             if index == FRAMES // 2:
