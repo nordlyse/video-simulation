@@ -765,7 +765,7 @@ def flow_reach(index):
     span = FLOW_Y - start
     local = int(index) % CYCLE_FRAMES
     seconds = float(local) / float(FPS)
-    progress = min(1.0, (seconds / 6.0) * 0.92)
+    progress = min(1.0, (seconds / 6.0) * 0.78)
     return start + span * progress
 
 
