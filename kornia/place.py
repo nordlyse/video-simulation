@@ -175,7 +175,7 @@ def lay_through_grass(frame, heat):
         return
     row = int(GRASS_Y)
     band = np.clip(heat[row:], 0, 1)
-    alpha = np.clip((band - 0.1) / 0.36, 0, 0.94)[..., None]
+    alpha = np.clip((band - 0.07) / 0.29, 0, 0.95)[..., None]
     crust = np.array([6, 12, 42], np.float32)
     mid = np.array([10, 40, 110], np.float32)
     core = np.array([96, 196, 255], np.float32)
@@ -848,16 +848,16 @@ def downhill_gain(y):
 
 
 def grass_flare(y):
-    """Channels stay apart in the grass and open only near the bottom edge."""
-    return float(np.clip((float(y) - (FLOW_Y - 32.0)) / 32.0, 0.0, 1.0) ** 1.35)
+    """Channels open through the grass and finish wider near the bottom edge."""
+    return float(np.clip((float(y) - (GRASS_Y + 8.0)) / 42.0, 0.0, 1.0) ** 1.1)
 
 
 def channel_width(width, y):
-    """Cap the slope, and let the streams meet only at the bottom edge."""
+    """Cap the slope, and let the grass end open into a thicker sheet."""
     down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
     flare = grass_flare(y)
-    opened = width * (1.0 + 1.6 * flare)
-    return min(opened, 6.0 + 11.0 * down + 18.0 * flare)
+    opened = width * (1.0 + 2.5 * flare)
+    return min(opened, 6.0 + 11.0 * down + 34.0 * flare)
 
 
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
@@ -923,41 +923,37 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
 
 
 def pool_on_grass(cover, light, heart, index):
-    """Streams stay apart through the grass and meet near the bottom edge."""
+    """A softer pool that still waits to meet until it nears the bottom edge."""
     front = flow_reach(index)
     into = float(np.clip((front - GRASS_Y) / 27.0, 0.0, 1.0))
-    if into < 0.06:
+    if into < 0.04:
         return cover, light, heart
-    sample = int(np.clip(front - 22.0, 0, HEIGHT - 1))
-    lip = np.clip(cover[sample], 0, 1)
-    if float(lip.max()) < 0.08:
+    row = int(GRASS_Y)
+    lip = cover[row : row + 12].max(axis=0)
+    sample = int(np.clip(front - 18.0, 0, HEIGHT - 1))
+    arrived = np.maximum(lip, cover[sample])
+    arrived = np.clip((arrived - 0.04) / 0.35, 0, 1) * (0.45 + 0.55 * into)
+    if float(arrived.max()) < 0.06:
         return cover, light, heart
     reach = GRASS_Y + into * (FLOW_Y - GRASS_Y)
     rows = np.arange(HEIGHT, dtype=np.float32)
-    join_from = reach - 18.0 * into
-    join = np.clip((rows - join_from) / 18.0, 0, 1) ** 1.2
+    depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
     seed = np.zeros_like(cover)
-    y0 = int(GRASS_Y)
+    y0 = row
     y1 = int(min(HEIGHT, reach + 1))
     if y1 <= y0:
         return cover, light, heart
-    seed[y0:y1] = lip[None, :]
-    tight = cv2.GaussianBlur(seed, (0, 0), 3.2)
-    wide = cv2.GaussianBlur(seed, (0, 0), 10 + 36 * into)
-    band = np.maximum(tight * 0.72, wide * join[:, None] * 0.35)
-    if into > 0.72:
-        kernel = int(41 + 80 * into)
-        if kernel % 2 == 0:
-            kernel += 1
-        joined = cv2.GaussianBlur(lip.reshape(1, -1), (kernel, 1), 0)[0]
-        joined = np.clip((joined - 0.02) / 0.12, 0, 1)
-        bottom = np.zeros_like(cover)
-        join_row = int(FLOW_Y - 22)
-        bottom[join_row:y1] = np.clip(joined, 0, 1)
-        band = np.maximum(band, bottom)
+    seed[y0 : y0 + 8] = arrived[None, :]
+    near = cv2.GaussianBlur(seed, (0, 0), 18)
+    far = cv2.GaussianBlur(seed, (0, 0), 56)
+    span = cv2.GaussianBlur(arrived.reshape(1, -1), (0, 0), 88)[0]
+    along = np.clip((rows - GRASS_Y) / max(reach - GRASS_Y, 1.0), 0, 1)
+    band = near * (1.0 - along * 0.35)[:, None] + far * np.clip(along * 1.35, 0, 1)[:, None]
+    join = np.clip((depth - 0.4) / 0.45, 0, 1) * into
+    band = np.maximum(band, span[None, :] * join[:, None] * 1.25)
     band[:y0] = 0
     band[y1:] = 0
-    band = np.clip(band, 0, 1)
+    band = np.clip(band * (0.9 + 0.5 * depth)[:, None], 0, 1)
     depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
     surface = np.clip(1.0 - depth * 0.28, 0, 1)[:, None]
     lip_shade = np.clip((depth - 0.5) / 0.5, 0, 1)[:, None]
