@@ -25,6 +25,7 @@ CYCLE_FRAMES = FPS * CYCLE_SECONDS
 APEX = (500.0, 148.0)
 BASE_Y = 468.0
 FLOW_Y = float(HEIGHT - 1)
+GRASS_Y = 472.0
 CRATER = (500, 156)
 # A real person covers more of the cutout than mask noise.
 MIN_PERSON = 0.005
@@ -168,8 +169,27 @@ def build_backdrop(grain):
     return np.clip(frame, 0, 255).astype(np.uint8)
 
 
-def sway_grass(frame, index):
-    """Tips lean left with the clouds. A gust travels through the meadow."""
+def lay_through_grass(frame, heat):
+    """The pool passes through the blades, with a bright surface and a darker near lip."""
+    if heat is None:
+        return
+    row = int(GRASS_Y)
+    band = np.clip(heat[row:], 0, 1)
+    alpha = np.clip((band - 0.07) / 0.29, 0, 0.95)[..., None]
+    crust = np.array([6, 12, 42], np.float32)
+    mid = np.array([10, 40, 110], np.float32)
+    core = np.array([96, 196, 255], np.float32)
+    hot = np.clip((band - 0.22) / 0.5, 0, 1)
+    color = crust * (1 - band)[..., None] + mid * band[..., None]
+    color = color * (1 - hot)[..., None] + core * hot[..., None]
+    depth = np.linspace(0, 1, band.shape[0], dtype=np.float32)[:, None, None]
+    color = color * (1 - np.clip((depth - 0.58) / 0.42, 0, 1) * 0.5)
+    base = frame[row:].astype(np.float32)
+    frame[row:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
+
+
+def sway_grass(frame, index, heat):
+    """Tips lean left with the clouds. Blades the lava touches sag and run downward."""
     gust = 0.65 + 0.35 * np.sin(index * 0.22)
     grass = np.random.default_rng(11)
     count = 1500
@@ -179,25 +199,49 @@ def sway_grass(frame, index):
     leans = grass.integers(-4, 5, size=count)
     picks = grass.integers(0, 5, size=count)
     blades = (
-        (24, 58, 26),
-        (32, 82, 34),
-        (18, 48, 22),
-        (40, 98, 42),
-        (28, 70, 30),
+        np.array([24, 58, 26], np.float32),
+        np.array([32, 82, 34], np.float32),
+        np.array([18, 48, 22], np.float32),
+        np.array([40, 98, 42], np.float32),
+        np.array([28, 70, 30], np.float32),
     )
+    lava = np.array([12, 58, 210], np.float32)
     for blade in range(count):
         x = int(xs[blade])
         y = int(ys[blade])
-        top = max(472, y - int(heights[blade]))
+        melt = 0.0
+        if heat is not None:
+            x0 = max(0, x - 3)
+            x1 = min(WIDTH, x + 4)
+            y0 = max(0, y - 18)
+            patch = heat[y0 : y + 1, x0:x1]
+            if patch.size:
+                melt = float(np.clip((float(patch.max()) - 0.05) / 0.28, 0, 1))
+            if melt <= 0.18:
+                continue
+            length = max(3, int((5 + heights[blade] * 0.35) * (1.0 - 0.55 * melt)))
+            drip = min(HEIGHT - 1, y + int(12 * melt))
+            crown = max(0, drip - length)
+            tip_x = int(np.clip(x + melt * 5.0, 0, WIDTH - 1))
+            tone = blades[int(picks[blade])] * (1.0 - melt) + lava * melt
+            color = tuple(int(channel) for channel in tone)
+            cv2.line(frame, (x, drip), (tip_x, crown), color, 1, cv2.LINE_AA)
+            continue
+        stand = 1.0 - 0.86 * melt
+        top = max(472, y - int(heights[blade] * stand))
+        sag = int(round(melt * (8 + heights[blade] * 0.55)))
+        top = min(y, top + sag)
         reach = (y - top) / 22.0
         wave = np.sin(index * 0.22 + x * 0.02)
-        shift = (-8.0 * gust + wave * 4.5) * reach + int(leans[blade]) * 0.35
-        mid_y = (y + top) // 2
+        shift = ((-8.0 * gust + wave * 4.5) * reach + int(leans[blade]) * 0.35) * (1.0 - 0.75 * melt)
+        mid_y = min(HEIGHT - 1, (y + top) // 2 + int(sag * 0.45))
         mid_x = int(np.clip(x + shift * 0.35, 0, WIDTH - 1))
-        tip_x = int(np.clip(x + shift, 0, WIDTH - 1))
-        color = blades[int(picks[blade])]
+        tip_x = int(np.clip(x + shift + melt * 4.0, 0, WIDTH - 1))
+        tone = blades[int(picks[blade])] * (1.0 - melt) + lava * melt
+        color = tuple(int(channel) for channel in tone)
         cv2.line(frame, (x, y), (mid_x, mid_y), color, 1, cv2.LINE_AA)
-        cv2.line(frame, (mid_x, mid_y), (tip_x, top), color, 1, cv2.LINE_AA)
+        if top < mid_y:
+            cv2.line(frame, (mid_x, mid_y), (tip_x, top), color, 1, cv2.LINE_AA)
 
 
 def add_crater(frame, index):
@@ -331,6 +375,42 @@ def add_flames(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
+def add_burst(frame, index):
+    """Now and then a darker jet shoots quickly up from the summit vent."""
+    period = 42
+    length = 10
+    phase = int(index) % period
+    if phase >= length:
+        return
+    u = phase / float(length - 1)
+    burst = int(index) // period
+    height = 78.0 + 34.0 * abs(float(np.sin(burst * 1.7)))
+    rise = (u ** 0.55) * height
+    cx, cy = float(APEX[0]), float(APEX[1])
+    cover = np.zeros((HEIGHT, WIDTH), np.float32)
+    lit = np.zeros((HEIGHT, WIDTH), np.float32)
+    lean = float(np.sin(burst * 0.9)) * 14.0
+    head = (int(round(cx + lean)), int(round(cy - rise)))
+    mouth = (int(round(cx)), int(round(cy)))
+    cv2.line(cover, mouth, head, 1.0, 14)
+    cv2.line(lit, mouth, head, 0.55, 6)
+    cv2.circle(cover, head, 16, 1.0, -1)
+    cv2.circle(lit, head, 7, 0.7, -1)
+    cv2.circle(cover, mouth, 8, 1.0, -1)
+    cover = cv2.GaussianBlur(cover, (21, 21), 6.0)
+    lit = cv2.GaussianBlur(lit, (15, 15), 4.0)
+    cover = np.clip(cover, 0, 1)
+    lit = np.clip(lit, 0, 1) * cover
+    crust = np.array([4, 8, 18], np.float32)
+    body = np.array([8, 22, 58], np.float32)
+    core = np.array([16, 48, 110], np.float32)
+    color = crust * (1 - lit)[..., None] + body * lit[..., None]
+    color = color * (1 - lit)[..., None] + core * lit[..., None]
+    alpha = np.clip(cover * (0.75 + 0.25 * u), 0, 1)[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
+
+
 def cone_lip(x):
     """The cone surface under x. Pieces land here and then slide."""
     apex_x, apex_y = APEX
@@ -348,7 +428,7 @@ def cone_lip(x):
 
 
 def stamp_melt(mask, hot, x, y, length, back_x, back_y, amount, salt):
-    """A lumpy clot stretched along its path. The hot core sits in the head."""
+    """A raindrop of lava. The round head leads and the tail thins behind it."""
     if length < 4 or amount <= 0:
         return
     norm = float(np.hypot(back_x, back_y))
@@ -357,46 +437,35 @@ def stamp_melt(mask, hot, x, y, length, back_x, back_y, amount, salt):
     else:
         bx, by = back_x / norm, back_y / norm
     px, py = -by, bx
+    length = length * (0.9 + 0.18 * abs(np.sin(salt * 1.7)))
     tail_x = x + bx * length
     tail_y = y + by * length
+    belly = length * (0.36 + 0.06 * abs(np.sin(salt)))
     steps = 8
-
-    def skin(t, side, phase):
-        neck = 0.22 + 0.35 * abs(np.sin(salt))
-        if 0.32 < t < 0.58:
-            pinch = neck + (1 - neck) * abs(t - 0.45) / 0.13
-        else:
-            pinch = 0.55 + 0.45 * abs(np.sin(t * np.pi * (1.3 + abs(np.sin(salt)))))
-        lump = 0.5 + 0.5 * abs(np.sin(t * 8.4 + salt * 2.1 + phase))
-        wide = max(0.7, min(length * 0.17 * pinch * lump, length * 0.4))
-        mx = tail_x + (x - tail_x) * t + px * np.sin(t * 6.4 + salt) * length * 0.04
-        my = tail_y + (y - tail_y) * t + py * np.sin(t * 6.4 + salt) * length * 0.04
-        return mx + px * wide * side, my + py * wide * side
-
-    pts = [skin(step / steps, 1.0, 0.0) for step in range(steps + 1)]
-    for step in range(1, 5):
-        ang = step / 5 * np.pi
-        lobe = 0.72 + 0.28 * np.sin(ang * 2.0 + salt)
-        pts.append((
-            x + np.cos(ang) * px * length * 0.1 * lobe - bx * np.sin(ang) * length * 0.07,
-            y + np.cos(ang) * py * length * 0.1 * lobe - by * np.sin(ang) * length * 0.07,
+    right = []
+    left = []
+    for step in range(steps + 1):
+        t = step / steps
+        wide = belly * (t ** 0.62)
+        mx = tail_x + (x - tail_x) * t
+        my = tail_y + (y - tail_y) * t
+        right.append((mx + px * wide, my + py * wide))
+        left.append((mx - px * wide, my - py * wide))
+    cap = []
+    for step in range(1, 7):
+        ang = step / 6 * np.pi
+        cap.append((
+            x + px * np.cos(ang) * belly - bx * np.sin(ang) * belly * 0.78,
+            y + py * np.cos(ang) * belly - by * np.sin(ang) * belly * 0.78,
         ))
-    pts.extend(skin(step / steps, -1.0, 1.8) for step in range(steps, -1, -1))
+    pts = right + cap + left[::-1]
     contour = np.array([(int(round(a)), int(round(b))) for a, b in pts], np.int32)
     cv2.fillPoly(mask, [contour], float(amount))
-    core = [skin(0.58 + 0.42 * step / steps, 0.42, 0.4) for step in range(steps + 1)]
-    core.extend(skin(0.58 + 0.42 * step / steps, -0.42, 2.1) for step in range(steps, -1, -1))
-    cv2.fillPoly(hot, [np.array([(int(round(a)), int(round(b))) for a, b in core], np.int32)], float(amount))
-    if amount > 0.55 and length > 12:
-        fleck = length * (0.045 + 0.02 * abs(np.sin(salt)))
-        fx = tail_x + bx * length * 0.18
-        fy = tail_y + by * length * 0.18
-        chip = np.array([
-            (int(round(fx - px * fleck)), int(round(fy - py * fleck))),
-            (int(round(fx + bx * fleck * 1.4)), int(round(fy + by * fleck * 1.4))),
-            (int(round(fx + px * fleck * 0.6)), int(round(fy + py * fleck * 0.6))),
-        ], np.int32)
-        cv2.fillPoly(mask, [chip], float(amount * 0.4))
+    core = (
+        int(round(x - bx * belly * 0.16)),
+        int(round(y - by * belly * 0.16)),
+    )
+    cv2.circle(hot, core, max(2, int(round(belly * 0.42))), float(amount), -1)
 
 
 def add_fountain(frame, index):
@@ -426,23 +495,18 @@ def add_fountain(frame, index):
             fall_u = u ** 1.15
             head_x = start_x + lean * fall_u
             head_y = start_y + (land_y - start_y) * fall_u
-            span = max(head_y - start_y, 6.0)
-            steps = max(6, int(span / 4.0))
-            for step in range(steps):
-                t = step / (steps - 1) if steps > 1 else 1.0
-                bow = np.sin(t * np.pi) * side * (3 + 2 * np.sin(phase))
+            for bit in range(3):
+                t = (bit + 1) / 3.0
+                if t > fall_u + 0.04:
+                    continue
+                bow = np.sin(t * np.pi) * side * (4 + 2 * np.sin(phase))
                 x = start_x + (head_x - start_x) * t + bow
                 y = start_y + (head_y - start_y) * t
-                amount = 0.16 + 0.7 * (t ** 1.4)
-                radius = 1.6 + 1.8 * t
-                center = (int(round(x)), int(round(y)))
-                cv2.circle(pour, center, max(2, int(round(radius))), float(amount), -1)
-            length = 11 + 16 * fall_u
-            stamp_melt(
-                drops, heads, head_x, head_y, length,
-                start_x - head_x, start_y - head_y - 5,
-                0.95, phase,
-            )
+                stamp_melt(
+                    drops, heads, x, y, 16 + 18 * t,
+                    start_x - x, start_y - y - 4,
+                    0.62 + 0.33 * t, phase + bit,
+                )
             continue
         if life < hit + slide_len:
             slide_u = (life - hit) / slide_len
@@ -466,22 +530,22 @@ def add_fountain(frame, index):
             sy = max(land_y + frac * run, cone_lip(sx) + 4)
             return sx, sy
 
-        for mark in range(7):
-            frac = slide_u * mark / 7
+        for mark in range(3):
+            frac = slide_u * mark / 3.0
             sx, sy = slope_at(frac)
             if sy >= BASE_Y - 10 or not (16 < sx < WIDTH - 16):
                 continue
-            behind = 1 - mark / 7
-            length = 4.2 + 7.4 * (1 - behind) ** 1.4
-            amount = 0.28 * (0.22 + 0.78 * (1 - behind)) * trail_fade
+            behind = 1 - mark / 3.0
+            length = 14.0 + 10.0 * (1 - behind)
+            amount = 0.42 * (0.35 + 0.65 * (1 - behind)) * trail_fade
             if amount < 0.04:
                 continue
-            sx += np.sin(phase + mark * 1.3) * 2.2 * behind
-            stamp_melt(drops, heads, sx, sy, length, -side * 0.62, -1.0, amount, phase + mark)
+            sx += np.sin(phase + mark * 1.3) * 3.0 * behind
+            stamp_melt(drops, heads, sx, sy, length, -side * 0.55, -1.0, amount, phase + mark)
         if head_fade > 0.04:
             sx, sy = slope_at(slide_u)
             if sy < BASE_Y - 10 and 16 < sx < WIDTH - 16:
-                stamp_melt(drops, heads, sx, sy, 15.5, -side * 0.62, -1.0, 0.9 * head_fade, phase + 2.0)
+                stamp_melt(drops, heads, sx, sy, 28.0, -side * 0.55, -1.0, 0.95 * head_fade, phase + 2.0)
     pour = cv2.GaussianBlur(pour, (7, 7), 1.6)
     drops = np.maximum(drops, np.clip(pour, 0, 1))
     soft = cv2.GaussianBlur(mask, (11, 11), 2.8)
@@ -783,6 +847,19 @@ def downhill_gain(y):
     return 1.0 + 1.7 * (down ** 1.15)
 
 
+def grass_flare(y):
+    """Channels open through the grass and finish wider near the bottom edge."""
+    return float(np.clip((float(y) - (GRASS_Y + 8.0)) / 42.0, 0.0, 1.0) ** 1.1)
+
+
+def channel_width(width, y):
+    """Cap the slope, and let the grass end open into a thicker sheet."""
+    down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
+    flare = grass_flare(y)
+    opened = width * (1.0 + 2.5 * flare)
+    return min(opened, 6.0 + 11.0 * down + 34.0 * flare)
+
+
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
     """A smooth limb. Shift moves the lit side toward the upper light."""
     left = []
@@ -798,7 +875,7 @@ def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shif
         lump = 0.5 + 0.5 * np.sin(t * 6.2 + phase + float(pos[i, 1]) * 0.02)
         grow = 0.78 + 0.22 * max(0.0, wave) if end_w > start_w else 1.0
         width *= (0.8 + 0.28 * lump + 0.12 * max(0.0, wave)) * grow * downhill_gain(pos[i, 1])
-        width = min(width, 6.0 + 11.0 * np.clip((float(pos[i, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
+        width = channel_width(width, pos[i, 1])
         half = max(0.45, width * inset)
         nx = -float(tangent[i, 1])
         ny = float(tangent[i, 0])
@@ -830,7 +907,7 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
             if end_w > start_w:
                 width *= 0.78 + 0.22 * wave
             width *= downhill_gain(pos[k, 1])
-            width = min(width, 6.0 + 11.0 * np.clip((float(pos[k, 1]) - 250.0) / (FLOW_Y - 250.0), 0, 1))
+            width = channel_width(width, pos[k, 1])
             heat = wave * wave * (3 - 2 * wave)
             half = max(0.3, width * (0.18 + 0.28 * heat))
             px = -float(tangent[k, 1])
@@ -843,6 +920,47 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
             continue
         quad = np.array([corners[0], corners[2], corners[3], corners[1]], np.int32)
         cv2.fillPoly(glow, [quad], int(amount * 255))
+
+
+def pool_on_grass(cover, light, heart, index):
+    """A softer pool that still waits to meet until it nears the bottom edge."""
+    front = flow_reach(index)
+    into = float(np.clip((front - GRASS_Y) / 27.0, 0.0, 1.0))
+    if into < 0.04:
+        return cover, light, heart
+    row = int(GRASS_Y)
+    lip = cover[row : row + 12].max(axis=0)
+    sample = int(np.clip(front - 18.0, 0, HEIGHT - 1))
+    arrived = np.maximum(lip, cover[sample])
+    arrived = np.clip((arrived - 0.04) / 0.35, 0, 1) * (0.45 + 0.55 * into)
+    if float(arrived.max()) < 0.06:
+        return cover, light, heart
+    reach = GRASS_Y + into * (FLOW_Y - GRASS_Y)
+    rows = np.arange(HEIGHT, dtype=np.float32)
+    depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
+    seed = np.zeros_like(cover)
+    y0 = row
+    y1 = int(min(HEIGHT, reach + 1))
+    if y1 <= y0:
+        return cover, light, heart
+    seed[y0 : y0 + 8] = arrived[None, :]
+    near = cv2.GaussianBlur(seed, (0, 0), 18)
+    far = cv2.GaussianBlur(seed, (0, 0), 56)
+    span = cv2.GaussianBlur(arrived.reshape(1, -1), (0, 0), 88)[0]
+    along = np.clip((rows - GRASS_Y) / max(reach - GRASS_Y, 1.0), 0, 1)
+    band = near * (1.0 - along * 0.35)[:, None] + far * np.clip(along * 1.35, 0, 1)[:, None]
+    join = np.clip((depth - 0.4) / 0.45, 0, 1) * into
+    band = np.maximum(band, span[None, :] * join[:, None] * 1.25)
+    band[:y0] = 0
+    band[y1:] = 0
+    band = np.clip(band * (0.9 + 0.5 * depth)[:, None], 0, 1)
+    depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
+    surface = np.clip(1.0 - depth * 0.28, 0, 1)[:, None]
+    lip_shade = np.clip((depth - 0.5) / 0.5, 0, 1)[:, None]
+    cover = np.maximum(cover, band)
+    light = np.maximum(light, band * (0.32 + 0.5 * surface) * (1.0 - lip_shade * 0.62))
+    heart = np.maximum(heart, band * surface * (1.0 - lip_shade) * 0.82)
+    return cover, light, heart
 
 
 def paint_channels(frame, index):
@@ -870,6 +988,7 @@ def paint_channels(frame, index):
     cover = reveal_downhill(cover, index)
     light = reveal_downhill(light, index)
     heart = reveal_downhill(heart, index)
+    cover, light, heart = pool_on_grass(cover, light, heart, index)
     crust = np.array([6, 12, 42], np.float32)
     mid = np.array([10, 40, 110], np.float32)
     core = np.array([96, 196, 255], np.float32)
@@ -1030,8 +1149,11 @@ def compose_frame(index, sprite, lobe_field, backdrop):
     melt = paint_channels(frame, index)
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
     add_flames(frame, index, billow)
+    add_burst(frame, index)
     add_fountain(frame, index)
-    sway_grass(frame, index)
+    sway_grass(frame, index, None)
+    lay_through_grass(frame, melt)
+    sway_grass(frame, index, melt)
     placed = False
     if sprite is not None:
         sx, sy, sw, sh = sprite_box(WIDTH, HEIGHT, sprite)
