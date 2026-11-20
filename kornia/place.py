@@ -331,6 +331,42 @@ def add_flames(frame, index, billow):
     frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
 
 
+def add_burst(frame, index):
+    """Now and then a darker jet shoots quickly up from the summit vent."""
+    period = 42
+    length = 10
+    phase = int(index) % period
+    if phase >= length:
+        return
+    u = phase / float(length - 1)
+    burst = int(index) // period
+    height = 78.0 + 34.0 * abs(float(np.sin(burst * 1.7)))
+    rise = (u ** 0.55) * height
+    cx, cy = float(APEX[0]), float(APEX[1])
+    cover = np.zeros((HEIGHT, WIDTH), np.float32)
+    lit = np.zeros((HEIGHT, WIDTH), np.float32)
+    lean = float(np.sin(burst * 0.9)) * 14.0
+    head = (int(round(cx + lean)), int(round(cy - rise)))
+    mouth = (int(round(cx)), int(round(cy)))
+    cv2.line(cover, mouth, head, 1.0, 14)
+    cv2.line(lit, mouth, head, 0.55, 6)
+    cv2.circle(cover, head, 16, 1.0, -1)
+    cv2.circle(lit, head, 7, 0.7, -1)
+    cv2.circle(cover, mouth, 8, 1.0, -1)
+    cover = cv2.GaussianBlur(cover, (21, 21), 6.0)
+    lit = cv2.GaussianBlur(lit, (15, 15), 4.0)
+    cover = np.clip(cover, 0, 1)
+    lit = np.clip(lit, 0, 1) * cover
+    crust = np.array([4, 8, 18], np.float32)
+    body = np.array([8, 22, 58], np.float32)
+    core = np.array([16, 48, 110], np.float32)
+    color = crust * (1 - lit)[..., None] + body * lit[..., None]
+    color = color * (1 - lit)[..., None] + core * lit[..., None]
+    alpha = np.clip(cover * (0.75 + 0.25 * u), 0, 1)[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1 - alpha) + color * alpha, 0, 255).astype(np.uint8)
+
+
 def cone_lip(x):
     """The cone surface under x. Pieces land here and then slide."""
     apex_x, apex_y = APEX
@@ -1030,6 +1066,7 @@ def compose_frame(index, sprite, lobe_field, backdrop):
     melt = paint_channels(frame, index)
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
     add_flames(frame, index, billow)
+    add_burst(frame, index)
     add_fountain(frame, index)
     sway_grass(frame, index)
     placed = False
