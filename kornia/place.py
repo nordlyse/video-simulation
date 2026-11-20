@@ -175,7 +175,7 @@ def lay_through_grass(frame, heat):
         return
     row = int(GRASS_Y)
     band = np.clip(heat[row:], 0, 1)
-    alpha = np.clip((band - 0.05) / 0.22, 0, 0.96)[..., None]
+    alpha = np.clip((band - 0.1) / 0.36, 0, 0.94)[..., None]
     crust = np.array([6, 12, 42], np.float32)
     mid = np.array([10, 40, 110], np.float32)
     core = np.array([96, 196, 255], np.float32)
@@ -209,16 +209,16 @@ def sway_grass(frame, index, heat):
     for blade in range(count):
         x = int(xs[blade])
         y = int(ys[blade])
-        hot = 0.0
+        melt = 0.0
         if heat is not None:
             x0 = max(0, x - 3)
             x1 = min(WIDTH, x + 4)
             y0 = max(0, y - 18)
             patch = heat[y0 : y + 1, x0:x1]
             if patch.size:
-                hot = float(patch.max())
-        melt = float(np.clip((hot - 0.05) / 0.28, 0, 1))
-        if melt > 0.18:
+                melt = float(np.clip((float(patch.max()) - 0.05) / 0.28, 0, 1))
+            if melt <= 0.18:
+                continue
             length = max(3, int((5 + heights[blade] * 0.35) * (1.0 - 0.55 * melt)))
             drip = min(HEIGHT - 1, y + int(12 * melt))
             crown = max(0, drip - length)
@@ -848,16 +848,16 @@ def downhill_gain(y):
 
 
 def grass_flare(y):
-    """Channels stay on the slope, then open wide once they meet the grass."""
-    return float(np.clip((float(y) - GRASS_Y) / 34.0, 0.0, 1.0) ** 1.05)
+    """Channels stay apart in the grass and open only near the bottom edge."""
+    return float(np.clip((float(y) - (FLOW_Y - 32.0)) / 32.0, 0.0, 1.0) ** 1.35)
 
 
 def channel_width(width, y):
-    """Cap the slope, and let the grass end spread into a thicker sheet."""
+    """Cap the slope, and let the streams meet only at the bottom edge."""
     down = np.clip((float(y) - 250.0) / (FLOW_Y - 250.0), 0.0, 1.0)
     flare = grass_flare(y)
-    opened = width * (1.0 + 3.6 * flare)
-    return min(opened, 6.0 + 11.0 * down + 52.0 * flare)
+    opened = width * (1.0 + 1.6 * flare)
+    return min(opened, 6.0 + 11.0 * down + 18.0 * flare)
 
 
 def limb_strip(pos, progress, tangent, start_w, end_w, phase, pinch, inset, shift, index):
@@ -923,27 +923,42 @@ def paint_flow(glow, pos, progress, tangent, start_w, end_w, pinch, index):
 
 
 def pool_on_grass(cover, light, heart, index):
-    """Once the sheet meets the grass, it spreads into a thicker pool."""
+    """Streams stay apart through the grass and meet near the bottom edge."""
     front = flow_reach(index)
-    into = float(np.clip((front - GRASS_Y) / 26.0, 0.0, 1.0))
-    if into < 0.02:
+    into = float(np.clip((front - GRASS_Y) / 27.0, 0.0, 1.0))
+    if into < 0.06:
         return cover, light, heart
-    row = int(GRASS_Y)
-    lip = cover[row : row + 12].max(axis=0)
+    sample = int(np.clip(front - 22.0, 0, HEIGHT - 1))
+    lip = np.clip(cover[sample], 0, 1)
     if float(lip.max()) < 0.08:
         return cover, light, heart
-    arrived = np.clip((lip - 0.04) / 0.35, 0, 1) * into
+    reach = GRASS_Y + into * (FLOW_Y - GRASS_Y)
     rows = np.arange(HEIGHT, dtype=np.float32)
-    depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
+    join_from = reach - 18.0 * into
+    join = np.clip((rows - join_from) / 18.0, 0, 1) ** 1.2
     seed = np.zeros_like(cover)
-    seed[row : row + 8] = arrived[None, :]
-    near = cv2.GaussianBlur(seed, (0, 0), 28)
-    far = cv2.GaussianBlur(seed, (0, 0), 72)
-    span = cv2.GaussianBlur(arrived.reshape(1, -1), (0, 0), 120)[0]
-    band = near * (1.0 - depth)[:, None] + far * np.clip(depth * 1.6, 0, 1)[:, None]
-    band = np.maximum(band, span[None, :] * np.clip((depth - 0.12) / 0.7, 0, 1)[:, None] * into)
-    band[:row] = 0
-    band = np.clip(band * (1.2 + 0.7 * depth)[:, None], 0, 1)
+    y0 = int(GRASS_Y)
+    y1 = int(min(HEIGHT, reach + 1))
+    if y1 <= y0:
+        return cover, light, heart
+    seed[y0:y1] = lip[None, :]
+    tight = cv2.GaussianBlur(seed, (0, 0), 3.2)
+    wide = cv2.GaussianBlur(seed, (0, 0), 10 + 36 * into)
+    band = np.maximum(tight * 0.72, wide * join[:, None] * 0.35)
+    if into > 0.72:
+        kernel = int(41 + 80 * into)
+        if kernel % 2 == 0:
+            kernel += 1
+        joined = cv2.GaussianBlur(lip.reshape(1, -1), (kernel, 1), 0)[0]
+        joined = np.clip((joined - 0.02) / 0.12, 0, 1)
+        bottom = np.zeros_like(cover)
+        join_row = int(FLOW_Y - 22)
+        bottom[join_row:y1] = np.clip(joined, 0, 1)
+        band = np.maximum(band, bottom)
+    band[:y0] = 0
+    band[y1:] = 0
+    band = np.clip(band, 0, 1)
+    depth = np.clip((rows - GRASS_Y) / max(FLOW_Y - GRASS_Y, 1.0), 0, 1)
     surface = np.clip(1.0 - depth * 0.28, 0, 1)[:, None]
     lip_shade = np.clip((depth - 0.5) / 0.5, 0, 1)[:, None]
     cover = np.maximum(cover, band)
