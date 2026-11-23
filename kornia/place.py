@@ -258,6 +258,27 @@ def add_crater(frame, index):
     frame[:] = np.clip(frame.astype(np.float32) + glow * 0.35, 0, 255).astype(np.uint8)
 
 
+def add_moon(frame):
+    """A pale moon in the upper right of the sky."""
+    cx, cy, radius = WIDTH - 78, 78, 48
+    disc = np.zeros(frame.shape[:2], np.float32)
+    shade = np.zeros(frame.shape[:2], np.float32)
+    marks = np.zeros(frame.shape[:2], np.float32)
+    cv2.circle(disc, (cx, cy), radius, 1.0, -1)
+    cv2.circle(shade, (cx - 16, cy + 5), radius - 4, 1.0, -1)
+    for ox, oy, mark, amount in ((-12, -8, 8, 0.42), (14, 11, 6, 0.34), (5, -18, 5, 0.28), (-18, 14, 5, 0.26)):
+        cv2.circle(marks, (cx + ox, cy + oy), mark, amount, -1)
+    shade = cv2.GaussianBlur(shade, (0, 0), 5) * disc
+    marks = cv2.GaussianBlur(marks, (0, 0), 1.4) * disc
+    lit = np.array([214, 224, 232], np.float32)
+    dark = np.array([148, 156, 166], np.float32)
+    color = dark * shade[..., None] + lit * (1.0 - shade[..., None])
+    color = color * (1.0 - marks[..., None]) + dark * marks[..., None]
+    cover = np.clip(disc, 0, 1)[..., None]
+    base = frame.astype(np.float32)
+    frame[:] = np.clip(base * (1.0 - cover) + color * cover, 0, 255).astype(np.uint8)
+
+
 def add_clouds(frame, index):
     """Soft cumulus banks. They drift from right to left and repeat."""
     color = np.zeros_like(frame, np.float32)
@@ -1145,6 +1166,7 @@ def open_writer(width, height, fps):
 def compose_frame(index, sprite, lobe_field, backdrop):
     frame = backdrop.copy()
     add_clouds(frame, index)
+    add_moon(frame)
     add_crater(frame, index)
     melt = paint_channels(frame, index)
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
