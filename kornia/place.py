@@ -260,29 +260,23 @@ def add_crater(frame, index):
 
 def add_moon(frame):
     """A pale moon in the upper right of the sky."""
-    cx, cy, radius = WIDTH - 92, 58, 28
-    glow = np.zeros(frame.shape[:2], np.float32)
+    cx, cy, radius = WIDTH - 78, 78, 48
     disc = np.zeros(frame.shape[:2], np.float32)
     shade = np.zeros(frame.shape[:2], np.float32)
     marks = np.zeros(frame.shape[:2], np.float32)
-    cv2.circle(glow, (cx, cy), radius + 18, 1.0, -1)
     cv2.circle(disc, (cx, cy), radius, 1.0, -1)
-    cv2.circle(shade, (cx - 10, cy + 3), radius - 2, 1.0, -1)
-    for ox, oy, mark, amount in ((-7, -5, 5, 0.42), (9, 7, 4, 0.34), (3, -11, 3, 0.28), (-11, 9, 3, 0.26)):
+    cv2.circle(shade, (cx - 16, cy + 5), radius - 4, 1.0, -1)
+    for ox, oy, mark, amount in ((-12, -8, 8, 0.42), (14, 11, 6, 0.34), (5, -18, 5, 0.28), (-18, 14, 5, 0.26)):
         cv2.circle(marks, (cx + ox, cy + oy), mark, amount, -1)
-    glow = cv2.GaussianBlur(glow, (0, 0), 9)
-    shade = cv2.GaussianBlur(shade, (0, 0), 4) * disc
-    marks = cv2.GaussianBlur(marks, (0, 0), 1.1) * disc
+    shade = cv2.GaussianBlur(shade, (0, 0), 5) * disc
+    marks = cv2.GaussianBlur(marks, (0, 0), 1.4) * disc
     lit = np.array([214, 224, 232], np.float32)
     dark = np.array([148, 156, 166], np.float32)
     color = dark * shade[..., None] + lit * (1.0 - shade[..., None])
     color = color * (1.0 - marks[..., None]) + dark * marks[..., None]
     cover = np.clip(disc, 0, 1)[..., None]
-    halo = np.clip(glow * (1.0 - disc), 0, 0.38)[..., None]
     base = frame.astype(np.float32)
-    mixed = base * (1.0 - cover) + color * cover
-    mixed = mixed + halo * np.array([170, 182, 194], np.float32)
-    frame[:] = np.clip(mixed, 0, 255).astype(np.uint8)
+    frame[:] = np.clip(base * (1.0 - cover) + color * cover, 0, 255).astype(np.uint8)
 
 
 def add_clouds(frame, index):
