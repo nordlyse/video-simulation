@@ -259,21 +259,30 @@ def add_crater(frame, index):
 
 
 def add_moon(frame):
-    """A pale moon in the upper right of the sky."""
+    """A pale moon in the upper right, with the usual dark patches."""
     cx, cy, radius = WIDTH - 78, 78, 48
     disc = np.zeros(frame.shape[:2], np.float32)
     shade = np.zeros(frame.shape[:2], np.float32)
-    marks = np.zeros(frame.shape[:2], np.float32)
+    maria = np.zeros(frame.shape[:2], np.float32)
     cv2.circle(disc, (cx, cy), radius, 1.0, -1)
     cv2.circle(shade, (cx - 16, cy + 5), radius - 4, 1.0, -1)
-    for ox, oy, mark, amount in ((-12, -8, 8, 0.42), (14, 11, 6, 0.34), (5, -18, 5, 0.28), (-18, 14, 5, 0.26)):
-        cv2.circle(marks, (cx + ox, cy + oy), mark, amount, -1)
+    for ox, oy, mark, amount, tilt in (
+        (-6, 8, 16, 0.78, 18),
+        (12, -6, 13, 0.7, -24),
+        (-14, -10, 9, 0.58, 40),
+        (4, 18, 8, 0.52, 8),
+        (18, 8, 6, 0.46, -12),
+    ):
+        cv2.ellipse(maria, (cx + ox, cy + oy), (mark, max(4, int(mark * 0.7))), tilt, 0, 360, amount, -1)
+    for ox, oy, mark, amount in ((-2, -16, 4, 0.5), (16, 16, 3, 0.42), (-18, 10, 3, 0.4)):
+        cv2.circle(maria, (cx + ox, cy + oy), mark, amount, -1)
     shade = cv2.GaussianBlur(shade, (0, 0), 5) * disc
-    marks = cv2.GaussianBlur(marks, (0, 0), 1.4) * disc
+    maria = np.clip(cv2.GaussianBlur(maria, (0, 0), 3.2), 0, 1) * disc
     lit = np.array([214, 224, 232], np.float32)
     dark = np.array([148, 156, 166], np.float32)
+    patch = np.array([92, 98, 108], np.float32)
     color = dark * shade[..., None] + lit * (1.0 - shade[..., None])
-    color = color * (1.0 - marks[..., None]) + dark * marks[..., None]
+    color = color * (1.0 - maria[..., None]) + patch * maria[..., None]
     cover = np.clip(disc, 0, 1)[..., None]
     base = frame.astype(np.float32)
     frame[:] = np.clip(base * (1.0 - cover) + color * cover, 0, 255).astype(np.uint8)
