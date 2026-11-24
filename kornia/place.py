@@ -258,13 +258,19 @@ def add_crater(frame, index):
     frame[:] = np.clip(frame.astype(np.float32) + glow * 0.35, 0, 255).astype(np.uint8)
 
 
+def moon_disc():
+    """The moon's round cover, so the clouds can pass in front of it."""
+    disc = np.zeros((HEIGHT, WIDTH), np.float32)
+    cv2.circle(disc, (WIDTH - 78, 78), 48, 1.0, -1)
+    return disc
+
+
 def add_moon(frame):
     """A pale moon in the upper right, with the usual dark patches."""
     cx, cy, radius = WIDTH - 78, 78, 48
-    disc = np.zeros(frame.shape[:2], np.float32)
+    disc = moon_disc()
     shade = np.zeros(frame.shape[:2], np.float32)
     maria = np.zeros(frame.shape[:2], np.float32)
-    cv2.circle(disc, (cx, cy), radius, 1.0, -1)
     cv2.circle(shade, (cx - 16, cy + 5), radius - 4, 1.0, -1)
     for ox, oy, mark, amount, tilt in (
         (-6, 8, 16, 0.78, 18),
@@ -320,6 +326,7 @@ def add_clouds(frame, index):
     cover = cv2.GaussianBlur(cover, (51, 51), 16)
     sky = (frame[:, :, 0].astype(np.float32) - frame[:, :, 2].astype(np.float32) - 6) / 18.0
     sky = cv2.GaussianBlur(np.clip(sky, 0, 1), (5, 5), 1.2)
+    sky = np.maximum(sky, moon_disc())
     alpha = np.clip(cover, 0, 0.78) * sky
     alpha = alpha[..., None]
     base = frame.astype(np.float32)
@@ -1174,8 +1181,8 @@ def open_writer(width, height, fps):
 
 def compose_frame(index, sprite, lobe_field, backdrop):
     frame = backdrop.copy()
-    add_clouds(frame, index)
     add_moon(frame)
+    add_clouds(frame, index)
     add_crater(frame, index)
     melt = paint_channels(frame, index)
     billow = scrolled(lobe_field, index, 1.4, HEIGHT)
